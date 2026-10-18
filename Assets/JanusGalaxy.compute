@@ -1,0 +1,113 @@
+// JanusGalaxy.compute
+// Modèle Janus (J.-P. Petit) :
+//   m+ / m+ : attraction
+//   m- / m- : attraction
+//   m+ / m- : répulsion mutuelle (pas d'emballement)
+// Intégration leapfrog Drift-Kick, en deux kernels pour éviter
+// que des threads lisent des positions déjà mises à jour.
+
+#pragma kernel CSKick
+#pragma kernel CSDrift
+
+#define TILE 256
+
+struct Body
+{
+    float3 pos;
+    float  mass;   // toujours > 0
+    float3 vel;
+    int    sign;   // +1 ou -1
+};
+
+RWStructuredBuffer<Body> _Bodies;
+
+int   _Count;
+float _G;
+float _Dt;        // pas de drift
+float _KickDt;    // pas de kick (dt/2 à l'init, dt ensuite)
+float _Softening;
+float _Damping;
+int   _NegativeStatic;
+
+// Environnement négatif analytique : la galaxie est dans une "cavité"
+// d'un océan uniforme de masse négative. Équivaut à l'opposé du champ
+// d'une sphère négative de masse _EnvMass et de rayon _EnvRadius.
+int   _UseEnv;
+float _EnvMass;
+float _EnvRadius;
+
+groupshared float4 sh[TILE]; // xyz = position, w = masse signée
+
+float3 EnvAccel(float3 p)
+{
+    float r = length(p);
+    float R = _EnvRadius;
+    if (r < R)
+        return -_G * _EnvMass / (R * R * R) * p;       // rappel harmonique
+    return -_G * _EnvMass * p / max(r * r * r, 1e-6);  // décroissance en 1/r²
+}
+
+[numthreads(TILE, 1, 1)]
+void CSKick(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+{
+    uint i = id.x;
+    bool valid = i < (uint)_Count;
+
+    Body b = (Body)0;
+    if (valid) b = _Bodies[i];
+
+    float  eps2 = _Softening * _Softening;
+    float3 acc  = 0;
+
+    // Somme directe O(N²) par tuiles en mémoire partagée
+    for (uint tile = 0; tile < (uint)_Count; tile += TILE)
+    {
+        uint j = tile + gtid.x;
+        if (j < (uint)_Count)
+        {
+            Body o = _Bodies[j];
+            sh[gtid.x] = float4(o.pos, o.mass * (float)o.sign);
+        }
+        else
+        {
+            sh[gtid.x] = 0;
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        [loop]
+        for (uint k = 0; k < TILE; k++)
+        {
+            float4 o  = sh[k];
+            float3 d  = o.xyz - b.pos;
+            float  r2 = dot(d, d) + eps2;
+            float  inv = rsqrt(r2);
+            acc += (o.w * inv * inv * inv) * d;   // auto-interaction : d = 0
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (!valid) return;
+    if (_NegativeStatic != 0 && b.sign < 0) return;
+
+    // signe_i * signe_j * m_j : même signe -> attraction, signes opposés -> répulsion
+    acc *= _G * (float)b.sign;
+
+    if (_UseEnv != 0 && b.sign > 0)
+        acc += EnvAccel(b.pos);
+
+    float3 v = b.vel + acc * _KickDt;
+    v *= (1.0 - _Damping);
+    _Bodies[i].vel = v;   // on n'écrit que la vitesse
+}
+
+[numthreads(TILE, 1, 1)]
+void CSDrift(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_Count) return;
+
+    Body b = _Bodies[i];
+    if (_NegativeStatic != 0 && b.sign < 0) return;
+
+    _Bodies[i].pos = b.pos + b.vel * _Dt;
+}

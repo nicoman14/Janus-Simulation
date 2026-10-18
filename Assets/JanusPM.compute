@@ -1,0 +1,435 @@
+// JanusPM.compute
+// Solveur Particle-Mesh périodique pour le modèle Janus (limite newtonienne).
+//
+// Lois d'interaction Janus :
+//   m+ / m+ : attraction     m- / m- : attraction     m+ / m- : répulsion mutuelle
+//
+// Elles s'écrivent avec UN SEUL potentiel :
+//   Δφ = 4πG (ρ+ − ρ−)          (ρ− en valeur absolue)
+//   a(m+) = −∇φ                 a(m−) = +∇φ
+// On résout donc une seule équation de Poisson par FFT dans une boîte périodique.
+// Le mode k = 0 est annulé (moyenne soustraite), ce qui est exact
+// si |M−| = M+ et l'approximation standard sinon.
+//
+// Types de particules (champ sign) :
+//   +1 = étoile (masse positive)
+//   −1 = masse négative (modèle Janus)
+//   +2 = particule de halo de matière noire (masse positive, modèle standard)
+//   +3 = gaz du disque (masse positive, dissipatif)
+//   +4 = étoile jeune formée à partir du gaz (le champ mass contient alors sa date de naissance)
+//
+// Gaz : à chaque pas, la vitesse de chaque particule de gaz est ramenée vers la vitesse
+// moyenne du gaz environnant (grille dédiée), sans descendre sous la vitesse du son.
+// L'énergie d'agitation est ainsi dissipée (refroidissement radiatif) : le gaz reste froid
+// et réactif, ce qui entretient les bras. Le gaz dense forme des étoiles jeunes ; après
+// leur durée de vie, une fraction retourne au gaz (vents, supernovæ), le reste devient
+// une étoile ordinaire.
+//
+// Pipeline par pas de temps :
+//   Drift -> ClearDensity -> Deposit (CIC) -> DensityToComplex
+//   -> FFT x,y,z -> SolvePoisson -> FFT inverse x,y,z -> Gradient -> Kick
+
+#pragma kernel CSClearDensity
+#pragma kernel CSDeposit
+#pragma kernel CSDensityToComplex
+#pragma kernel CSFFT
+#pragma kernel CSSolvePoisson
+#pragma kernel CSGradient
+#pragma kernel CSKick
+#pragma kernel CSDrift
+#pragma kernel CSGasClear
+#pragma kernel CSGasDeposit
+#pragma kernel CSGasUpdate
+#pragma kernel CSJanusV3
+
+#define PI 3.14159265358979
+#define FFT_THREADS 128
+#define FFT_MAX 256
+
+struct Body
+{
+    float3 pos;
+    float  mass;   // > 0
+    float3 vel;
+    int    sign;   // +1 / -1
+};
+
+RWStructuredBuffer<Body>   _Bodies;
+RWStructuredBuffer<uint>   _DensInt;  // 3*N³ : [3i] étoiles, [3i+1] négatives, [3i+2] halo (virgule fixe)
+RWStructuredBuffer<float2> _Grid;     // N³ complexes
+RWStructuredBuffer<float4> _Force;    // N³ : −∇φ_A, champ créé par les masses POSITIVES (matière ordinaire, halo)
+RWStructuredBuffer<float4> _ForceNeg; // N³ : −∇φ_B, champ créé par les masses NÉGATIVES (en valeur absolue)
+
+int   _Count;
+int   _N;
+int   _LogN;
+int   _Axis;
+int   _Inverse;
+float _FFTSign;
+float _L;
+float _G;
+float _Dt;
+float _KickDt;
+float _GravScale;      // expansion : 1/a³ (1 sans expansion)              — secteur positif
+float _VelDamp;        // expansion : exp(−2H·dt), freinage de Hubble       — secteur positif
+float _GravScaleNeg;   // idem pour le secteur négatif (facteur d'échelle propre ā)
+float _VelDampNeg;
+// Couplages croisés (modèle de Petit avec c− ≠ c+) :
+//   une masse positive subit   −∇(φ_A − κ² φ_B)
+//   une masse négative subit   −∇(φ_B − φ_A / κ²)      avec κ = c− / c+
+// κ = 1 : lois Janus habituelles (un seul potentiel φ_A − φ_B).
+float _CrossPos;       // κ²   : poids des masses négatives vues par les positives
+float _CrossNeg;       // 1/κ² : poids des masses positives vues par les négatives
+float _MassPos;
+float _MassNeg;
+float _MassHalo;
+float _FixScale;
+float _SmoothLen;
+int   _FreezeNegatives;   // expérience témoin : milieu négatif figé
+
+// Gaz
+RWStructuredBuffer<int> _GasGrid;   // NG³ × 4 : Σ w·vx, Σ w·vy, Σ w·vz, Σ w   (virgule fixe)
+int   _NG;
+float _GasFix;           // échelle de la virgule fixe
+float _GasCoolTime;      // temps de dissipation de l'agitation
+float _GasSoundSpeed;    // dispersion minimale (pression)
+int   _StarFormation;
+float _SFTime;           // temps caractéristique de formation d'étoiles
+float _SFThreshold;      // densité de gaz minimale (particules de gaz par cellule)
+float _YoungLifetime;
+float _RecycleFraction;
+float _SimTime;
+uint  _StepIndex;
+int   _GasN;             // seules les _GasN premières particules peuvent être du gaz ou des étoiles jeunes
+
+uint Hash(uint x)
+{
+    x ^= x >> 16; x *= 0x7feb352d;
+    x ^= x >> 15; x *= 0x846ca68b;
+    x ^= x >> 16;
+    return x;
+}
+float Rand(uint id, uint salt)
+{
+    return (Hash(id * 747796405u + Hash(_StepIndex * 2891336453u + salt)) & 0x00FFFFFF) / 16777216.0;
+}
+
+groupshared float2 sBuf[FFT_MAX];
+
+uint Idx(int3 c)
+{
+    // repliement périodique : N est une puissance de 2 et c ≥ −N, donc (c + N) & (N − 1) suffit
+    // (plus rapide qu'un modulo entier signé)
+    uint N = (uint)_N;
+    uint3 u = (uint3)(c + _N) & (N - 1u);
+    return u.x + N * (u.y + N * u.z);
+}
+
+float3 GridCoord(float3 pos)
+{
+    // centre de la cellule c en x = (c + 0.5) h − L/2
+    return (pos / _L + 0.5) * _N - 0.5;
+}
+
+// ---------------------------------------------------------------- densité
+
+[numthreads(8, 8, 8)]
+void CSClearDensity(uint3 id : SV_DispatchThreadID)
+{
+    uint i = Idx(int3(id));
+    _DensInt[3 * i]     = 0;
+    _DensInt[3 * i + 1] = 0;
+    _DensInt[3 * i + 2] = 0;
+}
+
+[numthreads(256, 1, 1)]
+void CSDeposit(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Count) return;
+    Body b = _Bodies[id.x];
+
+    float3 g  = GridCoord(b.pos);
+    float3 fl = floor(g);
+    int3   i0 = (int3)fl;
+    float3 f  = g - fl;
+    // étoiles, gaz et étoiles jeunes : même masse positive (slot 0)
+    uint slot = b.sign < 0 ? 1 : (b.sign == 2 ? 2 : 0);
+
+    [unroll]
+    for (int k = 0; k < 8; k++)
+    {
+        int3   o  = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        float3 w3 = lerp(1.0 - f, f, (float3)o);
+        uint   q  = (uint)(w3.x * w3.y * w3.z * _FixScale + 0.5);
+        InterlockedAdd(_DensInt[3 * Idx(i0 + o) + slot], q);
+    }
+}
+
+[numthreads(8, 8, 8)]
+void CSDensityToComplex(uint3 id : SV_DispatchThreadID)
+{
+    uint  i   = Idx(int3(id));
+    float h   = _L / _N;
+    float vol = h * h * h;
+    // Deux champs réels dans une seule FFT complexe :
+    //   partie réelle = masses positives (ordinaires + halo), partie imaginaire = masses négatives (|ρ−|).
+    // L'équation de Poisson est linéaire et son noyau est réel : les deux potentiels restent séparés.
+    float rhoPos = ((float)_DensInt[3 * i] * _MassPos + (float)_DensInt[3 * i + 2] * _MassHalo) / (_FixScale * vol);
+    float rhoNeg = ((float)_DensInt[3 * i + 1] * _MassNeg) / (_FixScale * vol);
+    _Grid[i] = float2(rhoPos, rhoNeg);
+}
+
+// ---------------------------------------------------------------- FFT 1D par ligne
+// Un groupe = une ligne de N points le long de _Axis. Dispatch (N, N, 1).
+
+[numthreads(FFT_THREADS, 1, 1)]
+void CSFFT(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID)
+{
+    uint N  = (uint)_N;
+    uint ln = gid.x + N * gid.y;
+    uint base, stride;
+
+    if (_Axis == 0)      { base = ln * N;                       stride = 1;     }
+    else if (_Axis == 1) { base = (ln % N) + N * N * (ln / N);  stride = N;     }
+    else                 { base = ln;                           stride = N * N; }
+
+    // Chargement en ordre bit-inversé
+    for (uint t = gtid.x; t < N; t += FFT_THREADS)
+    {
+        uint r = reversebits(t) >> (32 - (uint)_LogN);
+        sBuf[r] = _Grid[base + t * stride];
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // Papillons Cooley-Tukey radix 2
+    for (uint len = 2; len <= N; len <<= 1)
+    {
+        uint hs = len >> 1;
+        for (uint bf = gtid.x; bf < N / 2; bf += FFT_THREADS)
+        {
+            uint grp = bf / hs;
+            uint j   = bf % hs;
+            uint i0  = grp * len + j;
+            uint i1  = i0 + hs;
+
+            float  ang = _FFTSign * 2.0 * PI * (float)j / (float)len;
+            float2 w   = float2(cos(ang), sin(ang));
+            float2 u   = sBuf[i0];
+            float2 v   = sBuf[i1];
+            float2 vw  = float2(v.x * w.x - v.y * w.y, v.x * w.y + v.y * w.x);
+            sBuf[i0] = u + vw;
+            sBuf[i1] = u - vw;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    float scale = (_Inverse != 0) ? 1.0 / (float)N : 1.0;
+    for (uint t2 = gtid.x; t2 < N; t2 += FFT_THREADS)
+        _Grid[base + t2 * stride] = sBuf[t2] * scale;
+}
+
+// ---------------------------------------------------------------- Poisson
+
+[numthreads(8, 8, 8)]
+void CSSolvePoisson(uint3 id : SV_DispatchThreadID)
+{
+    int  N = _N;
+    uint i = Idx(int3(id));
+
+    int3 n = int3(id);
+    int half = N >> 1;
+    if (n.x > half) n.x -= N;
+    if (n.y > half) n.y -= N;
+    if (n.z > half) n.z -= N;
+
+    float3 k  = (float3)n * (2.0 * PI / _L);
+    float  k2 = dot(k, k);
+
+    if (k2 == 0) { _Grid[i] = 0; return; }   // moyenne soustraite
+
+    // φ_k = −4πG ρ_k / k², avec lissage gaussien (adoucissement)
+    float factor = -4.0 * PI * _G / k2 * exp(-k2 * _SmoothLen * _SmoothLen);
+    _Grid[i] *= factor;
+}
+
+[numthreads(8, 8, 8)]
+void CSGradient(uint3 id : SV_DispatchThreadID)
+{
+    int3  c = int3(id);
+    float h = _L / _N;
+
+    float2 dx = _Grid[Idx(c + int3(1, 0, 0))] - _Grid[Idx(c - int3(1, 0, 0))];
+    float2 dy = _Grid[Idx(c + int3(0, 1, 0))] - _Grid[Idx(c - int3(0, 1, 0))];
+    float2 dz = _Grid[Idx(c + int3(0, 0, 1))] - _Grid[Idx(c - int3(0, 0, 1))];
+
+    _Force[Idx(c)]    = float4(-float3(dx.x, dy.x, dz.x) / (2.0 * h), 0);   // −∇φ_A
+    _ForceNeg[Idx(c)] = float4(-float3(dx.y, dy.y, dz.y) / (2.0 * h), 0);   // −∇φ_B
+}
+
+// ---------------------------------------------------------------- particules
+
+void SampleForces(float3 pos, out float3 FA, out float3 FB)
+{
+    float3 g  = GridCoord(pos);
+    float3 fl = floor(g);
+    int3   i0 = (int3)fl;
+    float3 f  = g - fl;
+    FA = 0; FB = 0;
+
+    [unroll]
+    for (int k = 0; k < 8; k++)
+    {
+        int3   o  = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        float3 w3 = lerp(1.0 - f, f, (float3)o);
+        float  w  = w3.x * w3.y * w3.z;
+        uint   j  = Idx(i0 + o);
+        FA += w * _Force[j].xyz;
+        FB += w * _ForceNeg[j].xyz;
+    }
+}
+
+[numthreads(256, 1, 1)]
+void CSKick(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Count) return;
+    Body b = _Bodies[id.x];
+    if (_FreezeNegatives != 0 && (b.sign < 0 || b.sign == 2)) return;   // milieu figé (négatives ou halo)
+    float3 FA, FB;
+    SampleForces(b.pos, FA, FB);
+    // Coordonnées comobiles : d²x/dt² = −2H dx/dt + g/a³ (sans expansion : facteurs = 1),
+    // chaque secteur avec son propre facteur d'échelle.
+    if (b.sign > 0)
+    {
+        float3 a = FA - _CrossPos * FB;               // attirée par les positives, repoussée par les négatives
+        _Bodies[id.x].vel = b.vel * _VelDamp + a * (_GravScale * _KickDt);
+    }
+    else
+    {
+        float3 a = FB - _CrossNeg * FA;               // attirée par les négatives, repoussée par les positives
+        _Bodies[id.x].vel = b.vel * _VelDampNeg + a * (_GravScaleNeg * _KickDt);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void CSDrift(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Count) return;
+    Body b = _Bodies[id.x];
+    if (_FreezeNegatives != 0 && (b.sign < 0 || b.sign == 2)) return;   // milieu figé (négatives ou halo)
+    float3 p = b.pos + b.vel * _Dt;
+    p -= _L * floor(p / _L + 0.5);    // boîte périodique [−L/2, L/2)
+    _Bodies[id.x].pos = p;
+}
+
+// ---------------------------------------------------------------- gaz
+
+uint GasIdx(int3 c)
+{
+    int N = _NG;
+    c = ((c % N) + N) % N;
+    return (uint)(c.x + N * (c.y + N * c.z));
+}
+
+float3 GasCoord(float3 pos)
+{
+    return (pos / _L + 0.5) * _NG - 0.5;
+}
+
+[numthreads(8, 8, 8)]
+void CSGasClear(uint3 id : SV_DispatchThreadID)
+{
+    uint i = GasIdx(int3(id));
+    _GasGrid[4 * i]     = 0;
+    _GasGrid[4 * i + 1] = 0;
+    _GasGrid[4 * i + 2] = 0;
+    _GasGrid[4 * i + 3] = 0;
+}
+
+[numthreads(256, 1, 1)]
+void CSGasDeposit(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_GasN) return;
+    Body b = _Bodies[id.x];
+    if (b.sign != 3) return;
+
+    float3 g  = GasCoord(b.pos);
+    float3 fl = floor(g);
+    int3   i0 = (int3)fl;
+    float3 f  = g - fl;
+
+    [unroll]
+    for (int k = 0; k < 8; k++)
+    {
+        int3   o  = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        float3 w3 = lerp(1.0 - f, f, (float3)o);
+        float  w  = w3.x * w3.y * w3.z;
+        uint   c  = 4 * GasIdx(i0 + o);
+        InterlockedAdd(_GasGrid[c],     (int)round(w * b.vel.x * _GasFix));
+        InterlockedAdd(_GasGrid[c + 1], (int)round(w * b.vel.y * _GasFix));
+        InterlockedAdd(_GasGrid[c + 2], (int)round(w * b.vel.z * _GasFix));
+        InterlockedAdd(_GasGrid[c + 3], (int)round(w * _GasFix));
+    }
+}
+
+[numthreads(256, 1, 1)]
+void CSGasUpdate(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_GasN) return;
+    Body b = _Bodies[id.x];
+
+    if (b.sign == 3)
+    {
+        // Vitesse moyenne et densité du gaz autour de la particule
+        float3 g  = GasCoord(b.pos);
+        float3 fl = floor(g);
+        int3   i0 = (int3)fl;
+        float3 f  = g - fl;
+        float3 P = 0;
+        float  W = 0, rho = 0;
+
+        [unroll]
+        for (int k = 0; k < 8; k++)
+        {
+            int3   o  = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+            float3 w3 = lerp(1.0 - f, f, (float3)o);
+            float  w  = w3.x * w3.y * w3.z;
+            uint   c  = 4 * GasIdx(i0 + o);
+            float  Wc = _GasGrid[c + 3] / _GasFix;
+            P   += w * float3(_GasGrid[c], _GasGrid[c + 1], _GasGrid[c + 2]) / _GasFix;
+            W   += w * Wc;
+            rho += w * Wc;     // particules de gaz par cellule (interpolé)
+        }
+
+        if (W > 1.5)   // au moins un voisin : la moyenne a un sens
+        {
+            float3 vMean = P / W;
+            float3 d  = b.vel - vMean;
+            float  dl = length(d);
+            if (dl > _GasSoundSpeed)
+            {
+                float newL = max(dl * exp(-_Dt / _GasCoolTime), _GasSoundSpeed);
+                b.vel = vMean + d * (newL / dl);
+            }
+        }
+
+        if (_StarFormation != 0 && rho > _SFThreshold && Rand(id.x, 17u) < _Dt / _SFTime)
+        {
+            b.sign = 4;
+            b.mass = _SimTime;    // date de naissance
+        }
+        _Bodies[id.x] = b;
+    }
+    else if (b.sign == 4)
+    {
+        if (_SimTime - b.mass > _YoungLifetime)
+        {
+            b.sign = Rand(id.x, 91u) < _RecycleFraction ? 3 : 1;   // retour au gaz ou étoile ordinaire
+            b.mass = _MassPos;
+            _Bodies[id.x] = b;
+        }
+    }
+}
+
+// Marqueur de version (ne fait rien) : la simulation refuse de démarrer avec un compute shader plus ancien
+[numthreads(1, 1, 1)]
+void CSJanusV3(uint3 id : SV_DispatchThreadID) { }

@@ -1,0 +1,147 @@
+#pragma kernel CSInit
+#pragma kernel CSStep
+
+struct Body
+{
+    float3 pos;
+    float mass;
+    float3 vel; // IMPORTANT: we store HALF-STEP velocity here (v_{t+dt/2})
+    int sign;
+};
+
+RWStructuredBuffer<Body> _Bodies;
+
+int _Count;
+float _G;
+float _Dt;
+float _Softening;
+float _Damping; // you can keep = 0 for energy conservation
+int _SameSignAttracts;
+
+#define TILE 256
+groupshared Body tileBodies[TILE];
+
+float3 ComputeAccel(uint i, Body bi, bool active, uint3 tid)
+{
+    float3 ai = float3(0.0, 0.0, 0.0);
+    float eps2 = _Softening * _Softening;
+
+    for (uint baseIdx = 0; baseIdx < (uint) _Count; baseIdx += TILE)
+    {
+        uint j = baseIdx + tid.x;
+
+        // Safe load into shared memory (all threads participate)
+        if (j < (uint) _Count)
+            tileBodies[tid.x] = _Bodies[j];
+        else
+        {
+            tileBodies[tid.x].pos = float3(0.0, 0.0, 0.0);
+            tileBodies[tid.x].vel = float3(0.0, 0.0, 0.0);
+            tileBodies[tid.x].mass = 0.0;
+            tileBodies[tid.x].sign = 1;
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+
+        uint tileMax = min((uint) TILE, (uint) _Count - baseIdx);
+
+        if (active)
+        {
+            for (uint k = 0; k < tileMax; k++)
+            {
+                uint idx = baseIdx + k;
+                if (idx == i)
+                    continue;
+
+                Body bj = tileBodies[k];
+
+                float3 r = bj.pos - bi.pos;
+                float dist2 = dot(r, r) + eps2;
+
+                float invDist = rsqrt(dist2);
+                float invDist3 = invDist * invDist * invDist;
+
+                bool same = (bi.sign == bj.sign);
+                float s = (_SameSignAttracts == 1) ? (same ? 1.0 : -1.0) : (same ? -1.0 : 1.0);
+
+                ai += s * _G * bj.mass * r * invDist3;
+            }
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    return ai;
+}
+
+// ---- INIT KERNEL ----
+// Convert initial velocity v(t) to half-step velocity v(t+dt/2)
+// v_half = v + a(x)*dt/2
+[numthreads(256, 1, 1)]
+void CSInit(uint3 id : SV_DispatchThreadID, uint3 tid : SV_GroupThreadID)
+{
+    uint i = id.x;
+    bool active = (i < (uint) _Count);
+
+    Body bi;
+    if (active)
+        bi = _Bodies[i];
+    else
+    {
+        bi.pos = float3(0, 0, 0);
+        bi.vel = float3(0, 0, 0);
+        bi.mass = 1;
+        bi.sign = 1;
+    }
+
+    float3 ai = ComputeAccel(i, bi, active, tid);
+
+    if (active)
+    {
+        bi.vel = bi.vel + ai * (_Dt * 0.5);
+        _Bodies[i] = bi;
+    }
+}
+
+// ---- STEP KERNEL ----
+// Leapfrog Kick-Drift:
+// Kick: v_half += a(x)*dt
+// Drift: x += v_half*dt
+[numthreads(256, 1, 1)]
+void CSStep(uint3 id : SV_DispatchThreadID, uint3 tid : SV_GroupThreadID)
+{
+    uint i = id.x;
+    bool active = (i < (uint) _Count);
+
+    Body bi;
+    if (active)
+        bi = _Bodies[i];
+    else
+    {
+        bi.pos = float3(0, 0, 0);
+        bi.vel = float3(0, 0, 0);
+        bi.mass = 1;
+        bi.sign = 1;
+    }
+
+    float3 ai = ComputeAccel(i, bi, active, tid);
+
+    if (active)
+    {
+    // If negative: keep fixed in space (no motion)
+        if (bi.sign < 0)
+        {
+            _Bodies[i] = bi;
+            return;
+        }
+
+    // Positive: normal leapfrog
+        bi.vel += ai * _Dt;
+        bi.vel *= (1.0 - _Damping);
+        bi.pos += bi.vel * _Dt;
+
+        _Bodies[i] = bi;
+    }
+
+}
+

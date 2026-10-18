@@ -1,0 +1,28 @@
+# Unity : dossiers générés, à ne pas publier
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.unityproj
+.vs/
+.idea/
+.DS_Store
+# sorties du logiciel
+/JanusRuns/
+/JanusPresets/
+/JanusVideos/
+# ffmpeg (trop gros pour GitHub, à télécharger séparément)
+/Assets/StreamingAssets/ffmpeg*
+/Assets/StreamingAssets/ffmpeg*.meta
+# la version web est publiée dans docs/ (GitHub Pages), gardée dans le dépôt
