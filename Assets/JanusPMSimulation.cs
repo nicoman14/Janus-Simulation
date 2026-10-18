@@ -736,10 +736,10 @@ public class JanusPMSimulation : MonoBehaviour
             switch (lssModel)
             {
                 case LssModel.Janus:
-                case LssModel.MatiereNoire:         return negativeTotalMass / L3;
+                case LssModel.MatiereNoire: return negativeTotalMass / L3;
                 case LssModel.MatiereNoireRealiste: return lssRealisticRatio * positiveTotalMass / L3;
-                case LssModel.LambdaCDM:            return LcdmDmRatio * positiveTotalMass / L3;
-                default:                            return 0;
+                case LssModel.LambdaCDM: return LcdmDmRatio * positiveTotalMass / L3;
+                default: return 0;
             }
         }
     }
@@ -803,7 +803,7 @@ public class JanusPMSimulation : MonoBehaviour
             double a1 = a, v1 = v;
             double a2 = a1 + 0.5 * h * v1, v2 = v1 + 0.5 * h * A(a1);
             double a3 = a1 + 0.5 * h * v2, v3 = v1 + 0.5 * h * A(a2);
-            double a4 = a1 + h * v3,       v4 = v1 + h * A(a3);
+            double a4 = a1 + h * v3, v4 = v1 + h * A(a3);
             a = a1 + h / 6 * (v1 + 2 * v2 + 2 * v3 + v4);
             v = v1 + h / 6 * (A(a1) + 2 * A(a2) + 2 * A(a3) + A(a4));
             t += h;
@@ -1100,7 +1100,7 @@ public class JanusPMSimulation : MonoBehaviour
             compute.SetFloat("_VelDampNeg", (float)System.Math.Exp(-2.0 * Hubble(t) * h));
         }
     }
-    int total, particleGroups, g8;
+    int total, particleGroups, g8, g4;
     uint[] args = new uint[5];
     bool ready, readbackPending, lastShowNegatives;
     float simTime;
@@ -1171,9 +1171,11 @@ public class JanusPMSimulation : MonoBehaviour
 
     // ------------------------------------------------------------ pilotage (interface JanusUI)
 
-    [UIHide] [Tooltip("Lance la simulation au démarrage. Décoché : attendre le bouton Lecture de l'interface.")]
+    [UIHide]
+    [Tooltip("Lance la simulation au démarrage. Décoché : attendre le bouton Lecture de l'interface.")]
     public bool autoStart = true;
-    [UIHide] [Tooltip("Affichage texte des diagnostics par OnGUI (désactivé automatiquement par JanusUI)")]
+    [UIHide]
+    [Tooltip("Affichage texte des diagnostics par OnGUI (désactivé automatiquement par JanusUI)")]
     public bool legacyOnGUI = true;
     [System.NonSerialized] public bool paused;
     // fluidité de la vue (appelé par l'interface quand la caméra est manipulée)
@@ -1349,17 +1351,17 @@ public class JanusPMSimulation : MonoBehaviour
             return Fail(L("la cavité doit être plus petite que la demi-boîte.", "the cavity must be smaller than half the box."));
         }
 
-        kClear     = compute.FindKernel("CSClearDensity");
-        kDeposit   = compute.FindKernel("CSDeposit");
+        kClear = compute.FindKernel("CSClearDensity");
+        kDeposit = compute.FindKernel("CSDeposit");
         kToComplex = compute.FindKernel("CSDensityToComplex");
-        kFFT       = compute.FindKernel("CSFFT");
-        kPoisson   = compute.FindKernel("CSSolvePoisson");
-        kGradient  = compute.FindKernel("CSGradient");
-        kKick      = compute.FindKernel("CSKick");
-        kDrift     = compute.FindKernel("CSDrift");
-        kGasClear   = compute.FindKernel("CSGasClear");
+        kFFT = compute.FindKernel("CSFFT");
+        kPoisson = compute.FindKernel("CSSolvePoisson");
+        kGradient = compute.FindKernel("CSGradient");
+        kKick = compute.FindKernel("CSKick");
+        kDrift = compute.FindKernel("CSDrift");
+        kGasClear = compute.FindKernel("CSGasClear");
         kGasDeposit = compute.FindKernel("CSGasDeposit");
-        kGasUpdate  = compute.FindKernel("CSGasUpdate");
+        kGasUpdate = compute.FindKernel("CSGasUpdate");
         if (!Mathf.IsPowerOfTwo(gasGridSize) || gasGridSize < 16 || gasGridSize > 256)
         {
             return Fail(L("la grille du gaz doit être une puissance de 2 entre 16 et 256.", "the gas grid must be a power of 2 between 16 and 256."));
@@ -1444,13 +1446,13 @@ public class JanusPMSimulation : MonoBehaviour
         {
             if (on) models.Add(new Scenario { name = name, darkMatter = dm, profile = p, freeze = fz });
         }
-        Add(runJanusLibre,      "Janus_libre",      false, HaloProfile.NFW,             false);
-        Add(runJanusFige,       "Janus_fige",       false, HaloProfile.NFW,             true);
-        Add(runNFWLibre,        "NFW_libre",        true,  HaloProfile.NFW,             false);
-        Add(runNFWFige,         "NFW_fige",         true,  HaloProfile.NFW,             true);
-        Add(runIsothermeLibre,  "Isotherme_libre",  true,  HaloProfile.CoredIsothermal, false);
-        Add(runIsothermeFige,   "Isotherme_fige",   true,  HaloProfile.CoredIsothermal, true);
-        Add(runSphereLibre,     "Sphere_libre",     true,  HaloProfile.UniformSphere,   false);
+        Add(runJanusLibre, "Janus_libre", false, HaloProfile.NFW, false);
+        Add(runJanusFige, "Janus_fige", false, HaloProfile.NFW, true);
+        Add(runNFWLibre, "NFW_libre", true, HaloProfile.NFW, false);
+        Add(runNFWFige, "NFW_fige", true, HaloProfile.NFW, true);
+        Add(runIsothermeLibre, "Isotherme_libre", true, HaloProfile.CoredIsothermal, false);
+        Add(runIsothermeFige, "Isotherme_fige", true, HaloProfile.CoredIsothermal, true);
+        Add(runSphereLibre, "Sphere_libre", true, HaloProfile.UniformSphere, false);
         if (IsLss)
         {
             // Structure à grande échelle : les modèles de ce mode remplacent ceux du mode galaxie
@@ -1475,10 +1477,14 @@ public class JanusPMSimulation : MonoBehaviour
                                                        + (float.IsNaN(s8) ? "" : "_s8_" + s8.ToString("0.###", ci))
                                                        + (float.IsNaN(kp) ? "" : "_k" + kp.ToString("0.###", ci))
                                                        + (nf < 0 ? "" : nf == 0 ? "_ind" : "_anti"),
-                                    lss = LssModel.Janus, negRate = r, sigma8 = s8, kappa = kp, negField = nf
+                                    lss = LssModel.Janus,
+                                    negRate = r,
+                                    sigma8 = s8,
+                                    kappa = kp,
+                                    negField = nf
                                 });
             }
-            if (lssRunMatiereNoire)    models.Add(new Scenario { name = "LSS_MatiereNoire",    lss = LssModel.MatiereNoire });
+            if (lssRunMatiereNoire) models.Add(new Scenario { name = "LSS_MatiereNoire", lss = LssModel.MatiereNoire });
             if (lssRunPositivesSeules) models.Add(new Scenario { name = "LSS_PositivesSeules", lss = LssModel.PositivesSeules });
             if (lssRunMatiereNoireRealiste)
                 models.Add(new Scenario { name = "LSS_MatiereNoireRealiste", lss = LssModel.MatiereNoireRealiste });
@@ -1553,12 +1559,12 @@ public class JanusPMSimulation : MonoBehaviour
 
         total = positiveCount + negativeCount;
         particleGroups = Mathf.CeilToInt(total / 256f);
-        g8 = gridSize / 8;
+        g8 = gridSize / 8; g4 = gridSize / 4;
         int cells = gridSize * gridSize * gridSize;
 
-        bodyBuffer  = new ComputeBuffer(total, sizeof(float) * 7 + sizeof(int));
-        densBuffer  = new ComputeBuffer(cells * 3, sizeof(uint));
-        gridBuffer  = new ComputeBuffer(cells, sizeof(float) * 2);
+        bodyBuffer = new ComputeBuffer(total, sizeof(float) * 7 + sizeof(int));
+        densBuffer = new ComputeBuffer(cells * 3, sizeof(uint));
+        gridBuffer = new ComputeBuffer(cells, sizeof(float) * 2);
         forceBuffer = new ComputeBuffer(cells, sizeof(float) * 4);
         forceNegBuffer = new ComputeBuffer(cells, sizeof(float) * 4);
         int gasCells = gasGridSize * gasGridSize * gasGridSize;
@@ -1606,13 +1612,13 @@ public class JanusPMSimulation : MonoBehaviour
     void ReleaseBuffers()
     {
         ready = false;
-        bodyBuffer?.Release();  bodyBuffer = null;
-        densBuffer?.Release();  densBuffer = null;
-        gridBuffer?.Release();  gridBuffer = null;
+        bodyBuffer?.Release(); bodyBuffer = null;
+        densBuffer?.Release(); densBuffer = null;
+        gridBuffer?.Release(); gridBuffer = null;
         forceBuffer?.Release(); forceBuffer = null;
         forceNegBuffer?.Release(); forceNegBuffer = null;
         gasGridBuffer?.Release(); gasGridBuffer = null;
-        argsBuffer?.Release();  argsBuffer = null;
+        argsBuffer?.Release(); argsBuffer = null;
     }
 
     void PushParams()
@@ -2023,10 +2029,13 @@ public class JanusPMSimulation : MonoBehaviour
         int nM = Mathf.CeilToInt(Mathf.Pow(negativeCount, 1f / 3f) - 1e-3f);
         return new IcJob
         {
-            key = IcKey(), Lh = Lh, ns = lssSpectralIndex,
+            key = IcKey(),
+            Lh = Lh,
+            ns = lssSpectralIndex,
             A = SpectrumAmplitude(EffSigma8 * GrowthLcdm(lssStartRedshift), lssSpectralIndex),
             kCut = System.Math.PI * Mathf.Min(Mathf.Min(nB, nM), IcGrid) / Lh,
-            seed = seed, lpt2 = lss2LPT,
+            seed = seed,
+            lpt2 = lss2LPT,
             ownNeg = lssModel == LssModel.Janus && lssNegField == LssNegField.Independant
         };
     }
@@ -2452,13 +2461,13 @@ public class JanusPMSimulation : MonoBehaviour
 
     void ComputeField()
     {
-        compute.Dispatch(kClear, g8, g8, g8);
+        compute.Dispatch(kClear, g8, g8, g4);
         compute.Dispatch(kDeposit, particleGroups, 1, 1);
-        compute.Dispatch(kToComplex, g8, g8, g8);
+        compute.Dispatch(kToComplex, g8, g8, g4);
         FFT3D(false);
-        compute.Dispatch(kPoisson, g8, g8, g8);
+        compute.Dispatch(kPoisson, g8, g8, g4);
         FFT3D(true);
-        compute.Dispatch(kGradient, g8, g8, g8);
+        compute.Dispatch(kGradient, g8, g8, g4);
     }
 
     void FFT3D(bool inverse)
@@ -2555,7 +2564,7 @@ public class JanusPMSimulation : MonoBehaviour
                 int gg = gasGridSize / 8;
                 compute.SetFloat("_SimTime", simTime);
                 compute.SetInt("_StepIndex", stepCount);
-                compute.Dispatch(kGasClear, gg, gg, gg);
+                compute.Dispatch(kGasClear, gg, gg, gasGridSize / 4);
                 int gasGroups = Mathf.CeilToInt(GasCount / 256f);   // uniquement les particules de gaz possibles
                 compute.Dispatch(kGasDeposit, gasGroups, 1, 1);
                 compute.Dispatch(kGasUpdate, gasGroups, 1, 1);
@@ -3433,10 +3442,10 @@ public class JanusPMSimulation : MonoBehaviour
         var rselR = new System.Collections.Generic.List<double>();
         if (keptI.Count <= RvMaxVoids) { rsel.AddRange(keptI); rselR.AddRange(keptR); }
         else for (int t = 0; t < RvMaxVoids; t++)
-        {
-            int jt = (int)((long)t * keptI.Count / RvMaxVoids);
-            rsel.Add(keptI[jt]); rselR.Add(keptR[jt]);
-        }
+            {
+                int jt = (int)((long)t * keptI.Count / RvMaxVoids);
+                rsel.Add(keptI[jt]); rselR.Add(keptR[jt]);
+            }
         // profils jusqu'à 3 R_v pour chaque vide (et non plus 80 Mpc) : nécessaire pour la crête des grands vides
         int nRS = N2 / 2 - 1;
 
@@ -4422,11 +4431,11 @@ public class JanusPMSimulation : MonoBehaviour
         double mp = System.Math.Max(1e-30, (double)positiveTotalMass);
         switch (lssModel)
         {
-            case LssModel.Janus:                return -KappaSq * negativeTotalMass / mp;   // masses négatives : signe opposé
-            case LssModel.MatiereNoire:         return negativeTotalMass / mp;
+            case LssModel.Janus: return -KappaSq * negativeTotalMass / mp;   // masses négatives : signe opposé
+            case LssModel.MatiereNoire: return negativeTotalMass / mp;
             case LssModel.MatiereNoireRealiste: return lssRealisticRatio;
-            case LssModel.LambdaCDM:            return LcdmDmRatio;
-            default:                            return 0.0;                                 // positives seules : traceurs sans masse
+            case LssModel.LambdaCDM: return LcdmDmRatio;
+            default: return 0.0;                                 // positives seules : traceurs sans masse
         }
     }
     const int RvGrid = 128;            // grille fine des profils de vides

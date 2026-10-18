@@ -133,7 +133,7 @@ float3 GridCoord(float3 pos)
 
 // ---------------------------------------------------------------- densité
 
-[numthreads(8, 8, 8)]
+[numthreads(8, 8, 4)]
 void CSClearDensity(uint3 id : SV_DispatchThreadID)
 {
     uint i = Idx(int3(id));
@@ -165,7 +165,7 @@ void CSDeposit(uint3 id : SV_DispatchThreadID)
     }
 }
 
-[numthreads(8, 8, 8)]
+[numthreads(8, 8, 4)]
 void CSDensityToComplex(uint3 id : SV_DispatchThreadID)
 {
     uint  i   = Idx(int3(id));
@@ -230,7 +230,7 @@ void CSFFT(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID)
 
 // ---------------------------------------------------------------- Poisson
 
-[numthreads(8, 8, 8)]
+[numthreads(8, 8, 4)]
 void CSSolvePoisson(uint3 id : SV_DispatchThreadID)
 {
     int  N = _N;
@@ -252,7 +252,7 @@ void CSSolvePoisson(uint3 id : SV_DispatchThreadID)
     _Grid[i] *= factor;
 }
 
-[numthreads(8, 8, 8)]
+[numthreads(8, 8, 4)]
 void CSGradient(uint3 id : SV_DispatchThreadID)
 {
     int3  c = int3(id);
@@ -335,7 +335,7 @@ float3 GasCoord(float3 pos)
     return (pos / _L + 0.5) * _NG - 0.5;
 }
 
-[numthreads(8, 8, 8)]
+[numthreads(8, 8, 4)]
 void CSGasClear(uint3 id : SV_DispatchThreadID)
 {
     uint i = GasIdx(int3(id));
