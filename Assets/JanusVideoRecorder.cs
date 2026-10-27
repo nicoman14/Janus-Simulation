@@ -7,7 +7,8 @@
 //   - si ffmpeg est trouvé : encodage direct en MP4 (H.264) ;
 //   - sinon : suite d'images PNG numérotées (à assembler plus tard, par ex. avec ffmpeg).
 // L'interface (panneaux, boutons) n'apparaît pas dans la vidéo.
-// Une image de vidéo = une image calculée : la vidéo a une cadence régulière même si le calcul est lent.
+// Une image de vidéo = une image calculée (ou une sur N avec « Accélération ») : la vidéo a une cadence régulière
+// même si le calcul est lent.
 //
 // ffmpeg : placer ffmpeg.exe (Windows) ou ffmpeg (macOS / Linux) dans Assets/StreamingAssets (recommandé :
 // fonctionne dans l'éditeur et dans le build), ou à côté de l'exécutable, ou dans le PATH,
@@ -37,6 +38,14 @@ public class JanusVideoRecorder : MonoBehaviour
     [Tooltip("Cadence de la vidéo produite. Chaque image calculée devient une image de la vidéo.")]
     [TooltipEn("Frame rate of the produced video. Each computed frame becomes one video frame.")]
     public int fps = 30;
+    [UILabel("Accélération (1 image sur N)", En = "Speed-up (1 frame in N)")] [Live] [Range(1, 50)]
+    [Tooltip("N = 1 : chaque image calculée entre dans la vidéo. N = 10 : on ne garde qu'une image calculée sur 10, " +
+             "la vidéo défile donc 10 fois plus vite (et la simulation ralentit moins pendant l'enregistrement). " +
+             "Modifiable pendant l'enregistrement.")]
+    [TooltipEn("N = 1: every computed frame goes into the video. N = 10: only one computed frame in 10 is kept, " +
+               "so the video plays 10 times faster (and recording slows the simulation down less). " +
+               "Can be changed while recording.")]
+    public int frameStep = 1;
     [UILabel("Qualité (CRF)", En = "Quality (CRF)")] [Live] [Range(10, 35)]
     [Tooltip("Qualité de l'encodage MP4 : 18 = très bonne, 23 = standard, plus haut = fichier plus petit.")]
     [TooltipEn("MP4 encoding quality: 18 = very good, 23 = standard, higher = smaller file.")]
@@ -68,7 +77,7 @@ public class JanusVideoRecorder : MonoBehaviour
     Stream ffmpegIn;
     Thread writer;
     BlockingCollection<byte[]> frames;
-    int framesWritten, framesRequested, pending;
+    int framesWritten, framesRequested, pending, skipCounter;
     int recW, recH;
     string pngFolder, outputPath;
     volatile bool writerFailed;
@@ -108,7 +117,7 @@ public class JanusVideoRecorder : MonoBehaviour
         string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
 
         frames = new BlockingCollection<byte[]>(90);   // ~3 s d'avance au maximum (limite la mémoire)
-        framesWritten = framesRequested = pending = 0;
+        framesWritten = framesRequested = pending = skipCounter = 0;
         writerFailed = false;
 
         string exe = FindFfmpeg();
@@ -193,6 +202,7 @@ public class JanusVideoRecorder : MonoBehaviour
             yield return wait;
             if (!IsRecording) break;
             if (writerFailed) { StopRecording(); break; }
+            if (skipCounter++ % Mathf.Max(1, frameStep) != 0) continue;   // accélération : 1 image sur N
             pending++;
             framesRequested++;
             AsyncGPUReadback.Request(rt, 0, TextureFormat.RGBA32, OnFrame);

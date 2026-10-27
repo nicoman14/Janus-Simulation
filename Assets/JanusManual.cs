@@ -46,13 +46,13 @@ Gravity is Newtonian (weak-field limit), without general relativity, pressure or
         // ------------------------------------------------------------------ 2
         new Section("Prise en main", "Getting started",
 H + "La barre du haut" + HE + @"
-• <b>Lecture / Pause / Stop</b> : lance, suspend ou arrête la simulation (ou la campagne). Stop libère tout : les réglages redeviennent modifiables.
+• <b>Lecture / Pause / Stop</b> : lance, suspend ou arrête la simulation (ou la campagne). Stop libère tout : les réglages redeviennent modifiables. En grande échelle, le premier clic sur Lecture affiche le plan de lancement (c−/c+, |M−|, ā/a, σ₈ et H final prévu pour chaque modèle) ; un second clic lance. Le lancement est bloqué si un H final prévu s'écarte de plus de 20 % de 67,7 km/s/Mpc (case « Ignorer le garde-fou H₀ » pour forcer).
 • <b>Référence</b> : applique la configuration validée <i>du mode affiché</i>. Passez d'abord dans le bon mode (Scénario → mode), puis cliquez. Un message confirme « GALAXIE » ou « GRANDE ÉCHELLE ».
 • <b>Sauver / Charger</b> : enregistre ou recharge tous les réglages sous un nom. Utilisez-le systématiquement : Unity remet les valeurs de la scène après chaque recompilation.
-• <b>Enregistrer la vidéo</b>, <b>Mesures</b> (panneau de texte à droite), <b>Vue initiale</b>, <b>Manuel</b>, langue, masquer, quitter.
+• <b>Enregistrer la vidéo</b> (onglet Vidéo : « Accélération » ne garde qu'une image sur N pour une vidéo N fois plus rapide), <b>Mesures</b> (panneau de texte à droite), <b>Vue initiale</b>, <b>Manuel</b>, langue, masquer, quitter.
 
 " + H + "Le panneau de gauche" + HE + @"
-Les onglets regroupent les paramètres (Scénario, Simulation, Secteur négatif, Grande échelle, Campagne…). Survolez un champ pour lire son aide en bas du panneau. Pendant une simulation, seuls les champs marqués d'une barre bleue sont modifiables.
+Les onglets regroupent les paramètres : d'abord les réglages communs aux deux modèles (Scénario, Simulation, Univers en grande échelle, Galaxie et Gaz en mode galaxie), puis un onglet <b>Janus</b> et un onglet <b>ΛCDM</b> séparés, puis Mesures et export, Campagne, Rendu et Vidéo. Le réglage « Modèles : Janus et ΛCDM seulement » (onglet Scénario, activé par défaut) masque les anciens témoins. « Référence grande échelle » choisit la variante appliquée par le bouton Référence : Janus selon Petit (par défaut), Meilleur spectre ou Historique. Survolez un champ pour lire son aide en bas du panneau. Pendant une simulation, seuls les champs marqués d'une barre bleue sont modifiables.
 
 " + H + "La vue 3D" + HE + @"
 • Clic gauche glissé : rotation autour de la cible.
@@ -71,13 +71,13 @@ Pendant que vous manipulez la vue, le calcul ralentit automatiquement (un pas pa
 • Une même graine redonne exactement le même résultat : relancer ne sert à rien, changez de graine.
 • Vérifiez dans le CSV des runs les colonnes clés (box_size_mpc, light_speed_ratio, negative_total_mass, sigma8) avant d'interpréter.",
 H + "The top bar" + HE + @"
-• <b>Play / Pause / Stop</b>: starts, suspends or stops the simulation (or campaign). Stop releases everything: settings become editable again.
+• <b>Play / Pause / Stop</b>: starts, suspends or stops the simulation (or campaign). Stop releases everything: settings become editable again. In large-scale mode, the first click on Play shows the launch plan (c−/c+, |M−|, ā/a, σ₈ and predicted final H for each model); a second click launches. Launch is blocked if a predicted final H differs by more than 20% from 67.7 km/s/Mpc ('Ignore the H₀ guard' box to force).
 • <b>Reference</b>: applies the validated configuration <i>of the displayed mode</i>. Switch to the right mode first (Scenario → mode), then click. A message confirms « GALAXY » or « LARGE SCALE ».
 • <b>Save / Load</b>: saves or reloads all settings under a name. Use it every time: Unity restores the scene values after each recompilation.
-• <b>Record video</b>, <b>Measurements</b> (text panel on the right), <b>Reset view</b>, <b>Manual</b>, language, hide, quit.
+• <b>Record video</b> (Video tab: <i>Speed-up</i> keeps only one frame in N for an N times faster video), <b>Measurements</b> (text panel on the right), <b>Reset view</b>, <b>Manual</b>, language, hide, quit.
 
 " + H + "The left panel" + HE + @"
-Tabs group the parameters (Scenario, Simulation, Negative sector, Large scale, Campaign…). Hover over a field to read its help at the bottom of the panel. While a simulation runs, only fields marked with a blue bar can be changed.
+Tabs group the parameters: first the settings common to both models (Scenario, Simulation, Universe at large scale, Galaxy and Gas in galaxy mode), then separate <b>Janus</b> and <b>ΛCDM</b> tabs, then Measurements & export, Campaign, Rendering and Video. The 'Models: Janus and ΛCDM only' setting (Scenario tab, on by default) hides the old controls. 'Large-scale reference' chooses the variant applied by the Reference button: Janus per Petit (default), Best spectrum or Historical. Hover over a field to read its help at the bottom of the panel. While a simulation runs, only fields marked with a blue bar can be changed.
 
 " + H + "The 3D view" + HE + @"
 • Left drag: rotate around the target.
@@ -226,8 +226,13 @@ Le code utilise G = 1, une boîte de 400 unités et M+ = 35 000. Correspondances
 • Normalisation par σ₈ (sphère de 8 Mpc/h), multipliée par D(z_départ)², D = croissance linéaire de ΛCDM.
 • Champ gaussien tiré sur 128³, coupé au nombre d'onde de Nyquist du réseau de particules.
 • Déplacement des particules depuis un réseau au 2e ordre (2LPT) : ψ₁ = −∇∇⁻²δ, ψ₂ = −(3/7)∇φ₂.
-• Vitesses ΛCDM : f H ψ₁ + f₂ H ψ₂. Janus part au rebond (H = 0) avec des vitesses nulles.
+• Vitesses ΛCDM : f H ψ₁ + f₂ H ψ₂. Janus part au rebond (H = 0) ; par défaut avec des vitesses nulles.
+• Théorie linéaire de Janus (deux fluides, mêmes équations que le calcul N corps) : δ̈+ + 2H δ̇+ = 4πG/a³ (ρ+ δ+ − κ² ρ− δ−) et δ̈− + 2H̄ δ̇− = 4πG/ā³ (ρ− δ− − ρ+ δ+ / κ²). Elle donne la croissance linéaire de Janus (affichée au départ de chaque run) et, avec « Janus : conditions initiales = mode croissant linéaire », le mode qui croît le plus vite au départ : même champ pour les deux secteurs, δ− = r δ+ (r < 0 : anticorrélé) et vitesses δ̇ = γ δ. « σ₈ = valeur linéaire aujourd'hui » choisit l'amplitude de départ pour que la théorie linéaire donne σ₈ en fin de run, comme en ΛCDM.
 • Champ des masses négatives : indépendant (autre graine) ou anticorrélé (opposé de celui des baryons).
+• <b>Test de convergence</b> (onglet Campagne, « niveaux de résolution ») : 1 = grille 128³ et 64³ + 75³ particules, 2 = 256³ et 96³ + 112³, 3 = 256³ et 128³ + 149³ ; mêmes modes initiaux à tous les niveaux (coupure au niveau le plus grossier).
+• <b>Vitesse initiale de ā fixée par la courbure k̄ = −1</b> (onglet Janus) : la vitesse d'expansion de départ du secteur négatif découle de sa propre équation de Friedmann, avec la même courbure que notre secteur (λ ≈ 1 pour c−/c+ ≤ 0,1, ≈ 10 pour c−/c+ = 10 et ā/a = 0,01).
+• <b>Horloge T−/T+</b> (onglet Janus, exploratoire) : le temps propre du secteur négatif s'écoule T−/T+ fois plus vite que le nôtre ; toute la dynamique des masses négatives est accélérée d'autant, sans changer notre expansion. Listes de campagne « horloges T−/T+ » et « indices spectraux n_s » (Janus seulement).
+• <b>Janus phénoménologique</b> (onglet Janus) : test de principe issu de l'étude inverse, ce n'est plus le modèle de Petit. Expansion de ΛCDM imposée ; couplage croisé multiplié par s(z), attractif avant z ≈ 3,4 (le secteur négatif joue la matière noire), répulsif ensuite ; conditions initiales de ΛCDM.
 Le calcul se fait en tâche de fond au démarrage (le bouton Lecture devient actif à la fin).",
 H + "Particle-mesh (PM) solver" + HE + @"
 At each step, on the graphics card:
@@ -253,8 +258,13 @@ The code uses G = 1, a box of 400 units and M+ = 35,000. Correspondences:
 • Normalised by σ₈ (8 Mpc/h sphere), multiplied by D(z_start)², D = ΛCDM linear growth.
 • Gaussian field drawn on 128³, cut at the Nyquist wavenumber of the particle lattice.
 • Particles displaced from a lattice at second order (2LPT): ψ₁ = −∇∇⁻²δ, ψ₂ = −(3/7)∇φ₂.
-• ΛCDM velocities: f H ψ₁ + f₂ H ψ₂. Janus starts at the bounce (H = 0) with zero velocities.
+• ΛCDM velocities: f H ψ₁ + f₂ H ψ₂. Janus starts at the bounce (H = 0); by default with zero velocities.
+• Janus linear theory (two fluids, same equations as the N-body computation): δ̈+ + 2H δ̇+ = 4πG/a³ (ρ+ δ+ − κ² ρ− δ−) and δ̈− + 2H̄ δ̇− = 4πG/ā³ (ρ− δ− − ρ+ δ+ / κ²). It gives Janus's linear growth (shown at the start of each run) and, with 'Janus: initial conditions = linear growing mode', the fastest-growing mode at the start: the same field for both sectors, δ− = r δ+ (r < 0: anticorrelated) and velocities δ̇ = γ δ. 'σ₈ = linear value today' sets the starting amplitude so that linear theory gives σ₈ at the end of the run, as in ΛCDM.
 • Negative-mass field: independent (other seed) or anticorrelated (opposite of the baryons').
+• <b>Convergence test</b> (Campaign tab, 'resolution levels'): 1 = 128³ grid and 64³ + 75³ particles, 2 = 256³ and 96³ + 112³, 3 = 256³ and 128³ + 149³; same initial modes at every level (cut at the coarsest level).
+• <b>Initial rate of ā set by the curvature k̄ = −1</b> (Janus tab): the starting expansion rate of the negative sector follows from its own Friedmann equation, with the same curvature as our sector (λ ≈ 1 for c−/c+ ≤ 0.1, ≈ 10 for c−/c+ = 10 and ā/a = 0.01).
+• <b>Clock T−/T+</b> (Janus tab, exploratory): the negative sector's proper time runs T−/T+ times faster than ours; all negative-mass dynamics is sped up accordingly, without changing our expansion. Campaign lists 'clocks T−/T+' and 'spectral indices n_s' (Janus only).
+• <b>Phenomenological Janus</b> (Janus tab): proof-of-principle test from the inverse study, no longer Petit's model. ΛCDM expansion imposed; cross coupling multiplied by s(z), attractive before z ≈ 3.4 (the negative sector plays dark matter), repulsive afterwards; ΛCDM initial conditions.
 This is computed in the background at start-up (the Play button becomes active when done)."),
 
         // ------------------------------------------------------------------ 6
@@ -322,7 +332,7 @@ Les listes se combinent (produit cartésien) ; les témoins gardent les valeurs 
 " + H + "Taille de boîte" + HE + @"
 • 200 Mpc : meilleure résolution (particules de 5,6·10¹⁰ M☉), galaxies traceuses à la densité de BOSS.
 • 400 Mpc : 8 fois plus de volume pour les grands vides et les amas massifs (particules de 4,5·10¹¹ M☉).
-Changez la taille en Mpc (onglet Grande échelle), pas la taille en unités du code.",
+Changez la taille en Mpc (onglet Univers), pas la taille en unités du code.",
 H + "Reference (16/10/2026)" + HE + @"
 Box of 400 units = 200 Mpc, 256³ grid, 96³ ordinary particles (M+ = 35,000) and 112³ medium particles. Janus: c−/c+ = 0.1, |M−| = 1.6·10⁷, own scale factor (λ = 1), q₀ = −0.09, σ₈ = 0.3, independent negative field. ΛCDM: σ₈ = 0.81. Start z = 5.556, end today. Models: Janus + ΛCDM, 3 seeds.
 
@@ -362,7 +372,7 @@ H + "Contraste et spectre" + HE + @"
 " + H + "Galaxies, vides de galaxies, amas" + HE + @"
 • <b>gal_…</b> : groupes friends-of-friends (liaison 0,2 × séparation moyenne, ≥ 20 particules), les plus massifs gardés jusqu'à 3·10⁻⁴ (h/Mpc)³ (densité de BOSS).
 • <b>gv_…</b> : vides sphériques dans ces galaxies (seuil −0,8), fonction de taille et profils par tranche 10–20, 20–40, 40–80 Mpc/h.
-• <b>cl_…</b> : fonction de masse des amas, M200m (densité moyenne = 200 fois la moyenne de matière). Masse effective = celle qui attire la matière (pour Janus, un déficit de masse négative compte comme une masse en plus) ; masse ordinaire dans le même rayon.
+• <b>cl_…</b> : fonction de masse des amas, M200m (densité moyenne = 200 fois la moyenne de matière). Masse effective = celle qui attire la matière (pour Janus, un déficit de masse négative compte comme une masse en plus) ; masse ordinaire dans le même rayon. <b>cl_fb_…</b> : fraction de baryons δM_ord / δM_eff (fond retiré) des halos ≥ 10¹³ h⁻¹ M☉, à R200m et à 1, 2, 3 et 5 Mpc (ΛCDM ≈ Ω_b/Ω_m ≈ 0,16 ; amas observés : gaz + étoiles ≈ 0,15). <b>cl_fbproj_…</b> : la même fraction en projection, dans un cylindre de 1 ou 2 Mpc de rayon et ±50 Mpc de profondeur, comme le voit une lentille (ce qui est devant et derrière l'amas compte). <b>cl_negprof_…</b> : densité du milieu (masses négatives pour Janus, matière noire pour ΛCDM) autour des halos ≥ 10¹² h⁻¹ M☉, rapportée à sa moyenne, dans des coquilles de 0–1, 1–2, 2–3 et 3–5 Mpc.
 Ces mesures sont faites à la mesure finale seulement.
 
 " + H + "Fichiers" + HE + @"
@@ -388,7 +398,7 @@ H + "Contrast and spectrum" + HE + @"
 " + H + "Galaxies, galaxy voids, clusters" + HE + @"
 • <b>gal_…</b>: friends-of-friends groups (linking 0.2 × mean separation, ≥ 20 particles), the most massive kept up to 3·10⁻⁴ (h/Mpc)³ (BOSS density).
 • <b>gv_…</b>: spherical voids in these galaxies (threshold −0.8), size function and profiles in bins 10–20, 20–40, 40–80 Mpc/h.
-• <b>cl_…</b>: cluster mass function, M200m (mean density = 200 times the mean matter density). Effective mass = the one attracting matter (for Janus, a deficit of negative mass counts as extra mass); ordinary mass within the same radius.
+• <b>cl_…</b>: cluster mass function, M200m (mean density = 200 times the mean matter density). Effective mass = the one attracting matter (for Janus, a deficit of negative mass counts as extra mass); ordinary mass within the same radius. <b>cl_fb_…</b>: baryon fraction δM_ord / δM_eff (background removed) of halos ≥ 10¹³ h⁻¹ M☉, at R200m and at 1, 2, 3 and 5 Mpc (ΛCDM ≈ Ω_b/Ω_m ≈ 0.16; observed clusters: gas + stars ≈ 0.15). <b>cl_fbproj_…</b>: the same fraction in projection, in a cylinder of 1 or 2 Mpc radius and ±50 Mpc depth, as a lens sees it (what lies in front of and behind the cluster counts). <b>cl_negprof_…</b>: density of the medium (negative masses for Janus, dark matter for ΛCDM) around halos ≥ 10¹² h⁻¹ M☉, relative to its mean, in shells of 0–1, 1–2, 2–3 and 3–5 Mpc.
 These are computed at the final measurement only.
 
 " + H + "Files" + HE + @"

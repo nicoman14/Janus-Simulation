@@ -29,30 +29,32 @@ public class JanusUI : MonoBehaviour
     [Tooltip("Caméra pilotée à la souris (vide = caméra principale)")]
     public Camera cam;
     [Tooltip("Taille globale de l'interface (1 = normale)")]
-    [UIHide] [Range(0.6f, 2f)] public float uiScale = 1f;
+    [UIHide][Range(0.6f, 2f)] public float uiScale = 1f;
 
     [UIPanel("Mesures et export", En = "Measurements & export")]
-    [UILabel("Dossier des réglages", En = "Settings folder")] [Live] [FolderPath]
+    [UILabel("Dossier des réglages", En = "Settings folder")]
+    [Live]
+    [FolderPath]
     [Tooltip("Dossier où « Sauver » et « Charger » rangent les réglages nommés. Vide = dossier JanusPresets à côté de l'application.")]
     [TooltipEn("Folder where 'Save' and 'Load' keep named settings. Empty = JanusPresets folder next to the application.")]
     public string presetFolder = "";
 
     // ------------------------------------------------------------ style
 
-    static readonly Color CBar    = new Color(0.06f, 0.07f, 0.10f, 0.95f);
-    static readonly Color CPanel  = new Color(0.08f, 0.09f, 0.13f, 0.92f);
-    static readonly Color CTab    = new Color(0.13f, 0.15f, 0.20f, 1f);
-    static readonly Color CTabOn  = new Color(0.22f, 0.36f, 0.62f, 1f);
-    static readonly Color CField  = new Color(0.17f, 0.19f, 0.25f, 1f);
+    static readonly Color CBar = new Color(0.06f, 0.07f, 0.10f, 0.95f);
+    static readonly Color CPanel = new Color(0.08f, 0.09f, 0.13f, 0.92f);
+    static readonly Color CTab = new Color(0.13f, 0.15f, 0.20f, 1f);
+    static readonly Color CTabOn = new Color(0.22f, 0.36f, 0.62f, 1f);
+    static readonly Color CField = new Color(0.17f, 0.19f, 0.25f, 1f);
     static readonly Color CButton = new Color(0.20f, 0.23f, 0.30f, 1f);
     static readonly Color CAccent = new Color(0.36f, 0.62f, 1.00f, 1f);
-    static readonly Color CPlay   = new Color(0.18f, 0.50f, 0.30f, 1f);
-    static readonly Color CStop   = new Color(0.55f, 0.20f, 0.20f, 1f);
-    static readonly Color CRec    = new Color(0.75f, 0.12f, 0.15f, 1f);
-    static readonly Color CText   = new Color(0.90f, 0.92f, 0.96f, 1f);
-    static readonly Color CDim    = new Color(0.60f, 0.64f, 0.72f, 1f);
-    static readonly Color CWarn   = new Color(1.00f, 0.75f, 0.35f, 1f);
-    static readonly Color CError  = new Color(1.00f, 0.45f, 0.45f, 1f);
+    static readonly Color CPlay = new Color(0.18f, 0.50f, 0.30f, 1f);
+    static readonly Color CStop = new Color(0.55f, 0.20f, 0.20f, 1f);
+    static readonly Color CRec = new Color(0.75f, 0.12f, 0.15f, 1f);
+    static readonly Color CText = new Color(0.90f, 0.92f, 0.96f, 1f);
+    static readonly Color CDim = new Color(0.60f, 0.64f, 0.72f, 1f);
+    static readonly Color CWarn = new Color(1.00f, 0.75f, 0.35f, 1f);
+    static readonly Color CError = new Color(1.00f, 0.45f, 0.45f, 1f);
 
     const float BarH = 52f, PanelW = 580f, TabW = 150f, HelpH = 170f, RowH = 32f, DiagW = 640f;
 
@@ -199,6 +201,13 @@ public class JanusUI : MonoBehaviour
         CollectRenderEntries();
         CollectEntries(recorder);
         CollectEntries(this);
+        // ordre des onglets : réglages communs, puis Janus et ΛCDM côte à côte, puis mesures et campagne
+        string[] order = { "Scénario", "Simulation", "Univers", "Galaxie", "Gaz", "Janus", "ΛCDM",
+                           "Mesures et export", "Campagne", "Rendu", "Vidéo" };
+        int Rank(Panel p) { int r = Array.IndexOf(order, p.key); return r < 0 ? order.Length : r; }
+        var sorted = new List<Panel>(panels);
+        sorted.Sort((a, b) => { int c = Rank(a).CompareTo(Rank(b)); return c != 0 ? c : panels.IndexOf(a).CompareTo(panels.IndexOf(b)); });
+        panels.Clear(); panels.AddRange(sorted);
 
         BuildDragLayer();
         BuildPanel();
@@ -348,10 +357,17 @@ public class JanusUI : MonoBehaviour
             if (!mat.HasProperty(prop)) return;
             p.entries.Add(new Entry
             {
-                key = "Material." + prop, label = label, type = typeof(float), target = sim, live = true,
-                hasRange = true, min = min, max = max,
+                key = "Material." + prop,
+                label = label,
+                type = typeof(float),
+                target = sim,
+                live = true,
+                hasRange = true,
+                min = min,
+                max = max,
                 help = help + "\n\n" + L("Propriété du shader : ", "Shader property: ") + prop,
-                get = () => mat.GetFloat(prop), set = v => mat.SetFloat(prop, Convert.ToSingle(v))
+                get = () => mat.GetFloat(prop),
+                set = v => mat.SetFloat(prop, Convert.ToSingle(v))
             });
         }
         Add("_PointSize", "Taille des points (pixels)|Point size (pixels)", 1f, 8f,
@@ -659,9 +675,9 @@ public class JanusUI : MonoBehaviour
         h.childControlWidth = h.childControlHeight = true;
         h.childForceExpandWidth = h.childForceExpandHeight = false;
 
-        bPlay  = MakeButton(bar.transform, L("Lecture", "Play"), CPlay, OnPlay, 110, out tPlay);
+        bPlay = MakeButton(bar.transform, L("Lecture", "Play"), CPlay, OnPlay, 110, out tPlay);
         bPause = MakeButton(bar.transform, "Pause", CButton, OnPause, 100, out tPause);
-        bStop  = MakeButton(bar.transform, "Stop", CStop, OnStop, 80);
+        bStop = MakeButton(bar.transform, "Stop", CStop, OnStop, 80);
         Spacer(bar.transform, 10);
         bReference = MakeButton(bar.transform, L("Référence", "Reference"), CButton, OnReference, 110);
         Spacer(bar.transform, 10);
@@ -896,10 +912,21 @@ public class JanusUI : MonoBehaviour
             var h = parent.gameObject.AddComponent<HorizontalLayoutGroup>();
             h.spacing = 3; h.childControlWidth = h.childControlHeight = true; h.childForceExpandWidth = false;
             Text valueText = null;
+            bool Legacy(string n) => t.GetField(n)?.GetCustomAttribute<UILegacyAttribute>() != null;
+            bool HideLegacy()
+            {
+                var sf = e.target.GetType().GetField("simplifiedModels");
+                return sf != null && sf.FieldType == typeof(bool) && (bool)sf.GetValue(e.target);
+            }
             void Step(int d)
             {
                 int i = Array.IndexOf(names, e.get().ToString());
-                i = ((i + d) % names.Length + names.Length) % names.Length;
+                bool hide = HideLegacy();
+                for (int k = 0; k < names.Length; k++)          // valeurs historiques sautées en mode simplifié
+                {
+                    i = ((i + d) % names.Length + names.Length) % names.Length;
+                    if (!hide || !Legacy(names[i])) break;
+                }
                 Commit(e, Enum.Parse(t, names[i]));
             }
             var prev = MakeButton(parent, "<", CButton, () => Step(-1), -1); LE(prev.gameObject, 28, -1);
@@ -964,13 +991,13 @@ public class JanusUI : MonoBehaviour
         var ci = CultureInfo.InvariantCulture;
         switch (v)
         {
-            case float f:  return f.ToString("0.######", ci);
+            case float f: return f.ToString("0.######", ci);
             case double d: return d.ToString("0.######", ci);
-            case int i:    return i.ToString(ci);
-            case int[] a:  return string.Join(", ", Array.ConvertAll(a, x => x.ToString(ci)));
+            case int i: return i.ToString(ci);
+            case int[] a: return string.Join(", ", Array.ConvertAll(a, x => x.ToString(ci)));
             case float[] fa: return string.Join(" ; ", Array.ConvertAll(fa, x => x.ToString("0.####", ci)));
-            case null:     return "";
-            default:       return v.ToString();
+            case null: return "";
+            default: return v.ToString();
         }
     }
 
@@ -1349,10 +1376,34 @@ public class JanusUI : MonoBehaviour
 
     // ------------------------------------------------------------ actions
 
+    string confirmedPlan;   // plan de lancement déjà montré : un second clic sur Lecture lance
+
     void OnPlay()
     {
         if (sim.IsRunning && sim.paused) { sim.paused = false; return; }
-        if (!sim.IsRunning) sim.StartSimulation();
+        if (!sim.IsRunning)
+        {
+            // Grande échelle : premier clic = plan de lancement (valeurs principales, garde-fou H₀) ; second clic = lancement
+            string plan = sim.LaunchPlan(out bool bad);
+            if (!string.IsNullOrEmpty(plan))
+            {
+                if (bad && !sim.ignoreH0Guard)
+                {
+                    confirmedPlan = null;
+                    ShowMessage(L("LANCEMENT BLOQUÉ (garde-fou H₀).\n\n", "LAUNCH BLOCKED (H₀ guard).\n\n") + plan);
+                    return;
+                }
+                if (plan != confirmedPlan)
+                {
+                    confirmedPlan = plan;
+                    ShowMessage(plan + L("\n\nVérifie ces valeurs, puis clique de nouveau sur Lecture pour lancer.",
+                                         "\n\nCheck these values, then click Play again to launch."));
+                    return;
+                }
+            }
+            confirmedPlan = null;
+            sim.StartSimulation();
+        }
         RefreshAll();
     }
 
@@ -1378,19 +1429,11 @@ public class JanusUI : MonoBehaviour
         bool lss = sim.mode == JanusPMSimulation.InitMode.LargeScaleStructure;
         sim.ApplyReference();
         RefreshAll();
-        ShowMessage(lss
-            ? L("Référence GRANDE ÉCHELLE appliquée (15/10/2026) : c−/c+ = 0,1, |M−| = 1,6e7, 884 736 + 1 404 928 particules, " +
-                "spectre réaliste 2LPT, boîte 200 Mpc, Janus σ₈ = 0,3, ΛCDM σ₈ = 0,81, q₀ = −0,09 (z de départ ≈ 5,56). " +
-                "Campagne : Janus + ΛCDM, listes vides.",
-                "LARGE-SCALE reference applied (15/10/2026): c−/c+ = 0.1, |M−| = 1.6e7, 884,736 + 1,404,928 particles, " +
-                "realistic 2LPT spectrum, 200 Mpc box, Janus σ₈ = 0.3, ΛCDM σ₈ = 0.81, q₀ = −0.09 (start z ≈ 5.56). " +
-                "Campaign: Janus + ΛCDM, empty lists.")
-            : L("Référence GALAXIE appliquée : 300 000 étoiles, 480 000 particules de milieu, c−/c+ = 1. " +
-                "ATTENTION : si tu voulais la référence grande échelle, passe d'abord le mode sur « Grande échelle » " +
-                "puis clique de nouveau sur Référence (changer de mode après coup ne la remplace pas).",
-                "GALAXY reference applied: 300,000 stars, 480,000 medium particles, c−/c+ = 1. " +
-                "WARNING: if you wanted the large-scale reference, first switch the mode to 'Large scale' " +
-                "then click Reference again (changing the mode afterwards does not replace it)."));
+        ShowMessage(sim.ReferenceSummary + (lss ? "" :
+            L(" ATTENTION : si tu voulais la référence grande échelle, passe d'abord le mode sur « Grande échelle » " +
+              "puis clique de nouveau sur Référence (changer de mode après coup ne la remplace pas).",
+              " WARNING: if you wanted the large-scale reference, first switch the mode to 'Large scale' " +
+              "then click Reference again (changing the mode afterwards does not replace it).")));
     }
 
     void OnRecord()
