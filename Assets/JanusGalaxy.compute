@@ -32,6 +32,30 @@ int   _NegativeStatic;
 // Environnement négatif analytique : la galaxie est dans une "cavité"
 // d'un océan uniforme de masse négative. Équivaut à l'opposé du champ
 // d'une sphère négative de masse _EnvMass et de rayon _EnvRadius.
+//
+// CONVENTION DE FOND (explicitée après relecture) :
+//
+//  1. Le champ rendu est un EXCÈS, pas un champ total. L'océan uniforme ne
+//     contribue pas : dans un milieu homogène infini, la force nette est nulle
+//     par symétrie. Seul le trou compte. C'est la même convention que la
+//     soustraction de la densité moyenne dans le solveur comobile grande échelle.
+//
+//  2. _EnvMass est une MAGNITUDE, toujours > 0. Le signe est déjà dans les
+//     formules : -_G * _EnvMass * p / r³ pointe vers l'origine, donc attire.
+//     Un déficit de masse négative attire la matière ordinaire : le champ a
+//     exactement la forme de celui d'une masse POSITIVE _EnvMass à l'origine.
+//
+//  3. _EnvMass est un PARAMÈTRE LIBRE de ce volet galaxie. Il n'est pas dérivé
+//     de (c-/c+)² et de la densité moyenne du secteur négatif de la cosmologie :
+//     aucun facteur kappa² n'est appliqué ici, ni côté C#. Le confinement est donc
+//     AJUSTÉ à l'échelle de la galaxie, pas PRÉDIT par le fond cosmologique.
+//     C'est précisément l'écart d'un facteur ~1,7e5 discuté dans l'article :
+//     la densité moyenne verrouillée par H0 est très inférieure à celle qu'exige
+//     ce _EnvMass. Toute lecture de ce volet doit en tenir compte.
+//
+//  4. Profil : r < R, rappel harmonique -G M p / R³ (densité uniforme manquante) ;
+//     r > R, loi képlérienne -G M p / r³. Continu en r = R. Le pendant C#
+//     (JanusGalaxyManager.EnvAccel) renvoie la même chose en magnitude signée +.
 int   _UseEnv;
 float _EnvMass;
 float _EnvRadius;

@@ -26,3 +26,4 @@
 /Assets/StreamingAssets/ffmpeg*
 /Assets/StreamingAssets/ffmpeg*.meta
 # la version web est publiée dans docs/ (GitHub Pages), gardée dans le dépôt
+/executable janus windows

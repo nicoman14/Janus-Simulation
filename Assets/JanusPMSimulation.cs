@@ -31,23 +31,66 @@ public class JanusPMSimulation : MonoBehaviour
     [TooltipEn("Yes: the interface only offers Janus and the standard model (ΛCDM at large scale, NFW halo in galaxy mode). The old controls (same-mass dark matter, positive only, realistic dark matter, isothermal and sphere halos, frozen versions) are hidden and ignored in campaigns. No: all historical models become available again.")]
     public bool simplifiedModels = true;
 
+    // Niveau de détail des mesures. Les blocs ne coûtent pas la même chose : le spectre et les contrastes sont
+    // des FFT sur la grille, les vides du milieu un parcours de la grille, mais le bloc « galaxies » (groupes
+    // friends-of-friends, vides de galaxies, profils, lentille) et surtout le bloc « amas » (fonction de masse,
+    // fraction de baryons, lentille projetée, profil du milieu, effondrement, relation masse-lumière) parcourent
+    // des milliers de halos et trois populations de particules. Hors campagne, ces deux blocs tournent à CHAQUE
+    // mesure et provoquent les à-coups de l'affichage. Ce réglage ne s'applique qu'hors campagne : une campagne
+    // mesure toujours tout, pour que les fichiers restent comparables.
+    public enum LssOutputs
+    {
+        [InspectorName("Complètes"), EnName("Full")] Completes,
+        [InspectorName("Allégées — sans le bloc amas"), EnName("Lightened — no cluster block")] Allegees,
+        [InspectorName("Minimales — spectre et contrastes"), EnName("Minimal — spectrum and contrasts")] Minimales
+    }
+    [UILabel("Mesures à l'écran", En = "On-screen measurements")]
+    [ShowIf("IsLss & !batchMode")]
+    [Tooltip("Quelles mesures sont calculées hors campagne. « Complètes » : tout, comme en campagne. " +
+             "« Allégées » : tout sauf le bloc amas (fonction de masse, fraction de baryons, lentille projetée, " +
+             "profil du milieu, effondrement, relation masse-lumière), de loin le plus coûteux. " +
+             "« Minimales » : spectre, σ et corrélations seulement, sans les galaxies ni les amas. " +
+             "Les colonnes non calculées restent vides dans le CSV du run. UNE CAMPAGNE MESURE TOUJOURS TOUT, " +
+             "quel que soit ce réglage : les fichiers de campagne restent donc comparables entre eux.")]
+    [TooltipEn("Which measurements run outside campaigns. 'Full': everything, as in a campaign. 'Lightened': everything except the cluster block (mass function, baryon fraction, projected lensing, medium profile, collapse, mass-light relation), by far the most expensive. 'Minimal': spectrum, sigma and correlations only, no galaxies and no clusters. Columns not computed stay empty in the run CSV. A CAMPAIGN ALWAYS MEASURES EVERYTHING, whatever this setting, so campaign files remain comparable.")]
+    [UIPanel("Scénario", En = "Scenario", Single = true)]
+    public LssOutputs lssOutputs = LssOutputs.Completes;
+
     public enum LssReference
     {
-        [InspectorName("Janus selon Petit (c−/c+ = 10, ā/a = 0,01)"), EnName("Janus per Petit (c−/c+ = 10, ā/a = 0.01)")] Petit,
-        [InspectorName("Meilleur spectre (départ z = 20, q₀ = −0,025)"), EnName("Best spectrum (start z = 20, q₀ = −0.025)")] MeilleurSpectre,
-        [InspectorName("Historique du 15/10 (c−/c+ = 0,1, ā/a = 1)"), EnName("Historical 15/10 (c−/c+ = 0.1, ā/a = 1)")] Historique
+        [InspectorName("Janus selon Petit (c−/c+ = 10, ā/a = 0,01, χ̄ = χ)"), EnName("Janus per Petit (c−/c+ = 10, ā/a = 0.01, χ̄ = χ)")] Petit,
+        [InspectorName("Meilleur spectre — NON CONFORME (viole la relation 26)"), EnName("Best spectrum — NON-COMPLIANT (violates relation 26)")] MeilleurSpectre,
+        [InspectorName("Historique du 15/10 (c−/c+ = 0,1, ā/a = 1)"), EnName("Historical 15/10 (c−/c+ = 0.1, ā/a = 1)")] Historique,
+        [InspectorName("Janus 2014 (χ̄/χ = 1/κ⁴, vitesse parabolique) — le plus proche des observations"), EnName("Janus 2014 (χ̄/χ = 1/κ⁴, parabolic rate) — closest to observations")] Janus2014,
+        [InspectorName("Visuel rapide (démonstration, runs courts)"), EnName("Fast visual (demonstration, short runs)")] Visuel,
+        [InspectorName("Janus 2014 — courbure cohérente (k̄ = −1 imposé)"), EnName("Janus 2014 — consistent curvature (k̄ = −1 imposed)")] Janus2014Courbure,
+        [InspectorName("Démarrage — Janus 2014 + ΛCDM, allégée pour l'affichage"), EnName("Startup — Janus 2014 + ΛCDM, lightened for display")] Demarrage
     }
     [UIPanel("Scénario", En = "Scenario", Single = true)]
     [UILabel("Référence grande échelle", En = "Large-scale reference")]
     [ShowIf("IsLss")]
-    [Tooltip("Configuration appliquée par le bouton Référence en grande échelle (campagnes du 21 au 24/10/2026). " +
-             "Janus selon Petit : valeurs publiées les plus probables (c−/c+ = 10, ā/a = 1/100), q₀ = −0,09 ajusté sur les supernovae, " +
-             "σ₈ Janus = 0,04 qui donne le contraste de ΛCDM (σ_b ≈ 0,85) — le choix le plus fidèle au modèle. " +
-             "Meilleur spectre : départ à z = 20 (q₀ = −0,025, hors de l'ajustement des supernovae), σ₈ Janus = 0,1 : la forme du " +
-             "spectre la plus proche de ΛCDM. Historique : configuration du 15/10 (contraste trop fort, σ_b ≈ 1,1). " +
+    [Tooltip("Configuration appliquée par le bouton Référence en grande échelle. " +
+             "Démarrage : celle qui est appliquée au lancement. Physique identique à Janus 2014 et témoin ΛCDM actif, " +
+             "mais boîte de 200 Mpc, grille 128³, 64³ + 75³ particules, 8 mesures et bloc amas coupé hors campagne, " +
+             "pour que l'affichage reste fluide. Ses chiffres ne sont PAS comparables aux campagnes publiées : " +
+             "revenir à Janus 2014 pour produire un résultat. " +
+             "Janus 2014 : la plus proche des observations à ce jour — paramètres de Petit, χ̄/χ = 1/(c−/c+)⁴ " +
+             "(convention de 2014), σ₈ interprété comme le σ₈ linéaire final = 0,81 comme ΛCDM. Elle garde la vitesse " +
+             "initiale parabolique du secteur négatif (λ = 1), qui reproduit les campagnes, et n'impose donc PAS la " +
+             "contrainte de courbure k̄ = −1 : elle n'est pas pleinement auto-cohérente au sens de l'audit du § 5.8. " +
+             "Janus 2014 — courbure cohérente : mêmes paramètres, mais la vitesse initiale de ā découle de la courbure " +
+             "commune aux deux métriques. C'est la variante à utiliser pour tester si les meilleurs résultats survivent " +
+             "à l'application simultanée de toutes les contraintes d'expansion. " +
+             "Janus selon Petit : mêmes paramètres mais χ̄ = χ et σ₈ Janus = 0,04 ; c'est la base de toutes les campagnes " +
+             "du 21 au 27/10/2026, conservée pour comparaison. " +
+             "Visuel rapide : physique de Janus 2014 sur une boîte de 200 Mpc, grille 128³, 64³ + 75³ particules et 4 mesures " +
+             "seulement — pour une démonstration à l'écran ou la version web, pas pour produire un résultat. " +
+             "Meilleur spectre : NON CONFORME, elle viole la relation (26) de Petit d'un facteur 100 et l'inégalité c− > c+ ; " +
+             "conservée seulement pour reproduire les campagnes antérieures. " +
+             "Historique : configuration du 15/10 (contraste trop fort, σ_b ≈ 1,1). " +
              "Aucune ne reproduit les amas observés.")]
-    [TooltipEn("Configuration applied by the Reference button at large scale (campaigns of 21–24/10/2026). Janus per Petit: most likely published values (c−/c+ = 10, ā/a = 1/100), q₀ = −0.09 fitted to supernovae, Janus σ₈ = 0.04 giving the ΛCDM contrast (σ_b ≈ 0.85) — the choice most faithful to the model. Best spectrum: start at z = 20 (q₀ = −0.025, outside the supernova fit), Janus σ₈ = 0.1: the spectrum shape closest to ΛCDM. Historical: configuration of 15/10 (contrast too strong, σ_b ≈ 1.1). None reproduces the observed clusters.")]
-    public LssReference lssReference = LssReference.Petit;
+    [TooltipEn("Configuration applied by the Reference button at large scale. Startup: the one applied on launch. Same physics as Janus 2014 with the ΛCDM control on, but a 200 Mpc box, 128³ grid, 64³ + 75³ particles, 8 measurements and the cluster block switched off outside campaigns, so the display stays fluid. Its figures are NOT comparable with the published campaigns: go back to Janus 2014 to produce a result. Janus 2014: closest to observations so far — Petit's parameters, χ̄/χ = 1/(c−/c+)⁴ (2014 convention), σ₈ read as the final linear σ₈ = 0.81 as in ΛCDM. It keeps the parabolic initial rate of the negative sector (λ = 1), which reproduces the campaigns, and therefore does NOT impose the curvature constraint k̄ = −1: it is not fully self-consistent in the sense of the § 5.8 audit. Janus 2014 — consistent curvature: same parameters, but the initial rate of ā follows from the curvature shared by both metrics; this is the variant to use to test whether the best results survive imposing every expansion constraint at once. Janus per Petit: same parameters but χ̄ = χ and Janus σ₈ = 0.04; this is the basis of every campaign from 21 to 27/10/2026, kept for comparison. Fast visual: the Janus 2014 physics on a 200 Mpc box, 128³ grid, 64³ + 75³ particles and only 4 measurements — for an on-screen demonstration or the web build, not to produce a result. Best spectrum: NON-COMPLIANT, it violates Petit's relation (26) by a factor 100 and the inequality c− > c+; kept only to reproduce earlier campaigns. Historical: configuration of 15/10 (contrast too strong, σ_b ≈ 1.1). None reproduces the observed clusters.")]
+    public LssReference lssReference = LssReference.Demarrage;
     [UILabel("Graine aléatoire (seed)", En = "Random seed")]
     [Tooltip("Même seed = mêmes conditions initiales : le résultat est exactement reproductible. Ignorée en campagne (liste de seeds).")]
     [ShowIf("!batchMode")]
@@ -116,13 +159,31 @@ public class JanusPMSimulation : MonoBehaviour
     [TooltipEn("Number of steps computed per displayed frame (outside campaigns). More = faster, less smooth display.")]
     [UIPanel("Simulation", En = "Simulation", Single = true)]
     public int stepsPerFrame = 2;
-    [Tooltip("Expérience témoin : les masses négatives restent figées à leur position initiale. " +
-             "Même force moyenne dans la cavité, mais le milieu ne réagit plus au disque.")]
+    [Tooltip("Expérience témoin : les masses négatives restent figées à leur position initiale, mais continuent " +
+             "d'exercer leur champ sur la matière ordinaire. En mode galaxie : même force moyenne dans la cavité, " +
+             "mais le milieu ne réagit plus au disque. En grande échelle : témoin de la limite χ̄/χ → 0, où le secteur " +
+             "négatif est figé dynamiquement tout en gardant son champ. À comparer à χ̄/χ = 10⁻⁶ et à un modèle sans " +
+             "masses négatives, pour savoir si cette limite équivaut vraiment à « baryons seuls ». " +
+             "Sans effet sur les modèles témoins (ΛCDM, matière noire), qui ne sont jamais figés.")]
     [UILabel("Milieu figé (témoin)", En = "Frozen medium (control)")]
-    [ShowIf("!simplifiedModels & IsGalaxy & !batchMode")]
-    [TooltipEn("Control experiment: the negative masses stay frozen at their initial positions. Same mean force inside the cavity, but the medium no longer reacts to the disk.")]
+    [ShowIf("!simplifiedModels & IsGalaxy & !batchMode | IsLss & IsJanusLss")]
+    [TooltipEn("Control experiment: the negative masses stay frozen at their initial positions but keep exerting their field on ordinary matter. Galaxy mode: same mean force inside the cavity, but the medium no longer reacts to the disk. Large scale: a control for the χ̄/χ → 0 limit, where the negative sector is dynamically frozen while keeping its field. Compare with χ̄/χ = 10⁻⁶ and with a run without negative masses, to find out whether that limit really amounts to 'baryons only'. No effect on the control models (ΛCDM, dark matter), which are never frozen.")]
     [UIPanel("Janus", En = "Janus", Single = true)]
     public bool freezeNegatives = false;
+
+    [UILabel("Masses négatives sans champ sur la matière ordinaire (témoin)", En = "Negative masses exert no field on ordinary matter (control)")]
+    [ShowIf("IsLss & IsJanusLss")]
+    [Tooltip("Expérience témoin pour la limite χ̄/χ → 0. Le couplage croisé subi par les positives est mis à zéro : " +
+             "la matière ordinaire n'est plus soumise qu'à sa propre gravité. Tout le reste est inchangé — mêmes " +
+             "conditions initiales, même milieu négatif, et surtout la même expansion, puisque celle-ci reste pilotée " +
+             "par κ²ρ− − ρ+. C'est le vrai témoin « baryons seuls » : le modèle « Positives seules » n'en est pas un, " +
+             "car en supprimant la masse négative il perd le moteur de l'expansion et retombe sur Einstein-de Sitter " +
+             "à H ≈ 35 km/s/Mpc. Sans effet sur les modèles témoins.")]
+    [TooltipEn("Control experiment for the χ̄/χ → 0 limit. The cross coupling felt by the positives is set to zero: ordinary matter is left with its own gravity only. Everything else is unchanged — same initial conditions, same negative medium, and above all the same expansion, which is still driven by κ²ρ− − ρ+. This is the true 'baryons only' control: the 'Positive only' model is not one, because removing the negative mass also removes the engine of the expansion and falls back to Einstein-de Sitter at H ≈ 35 km/s/Mpc. No effect on the control models.")]
+    [UIPanel("Janus", En = "Janus", Single = true)]
+    public bool negNoFieldOnPositives = false;
+    // couplage croisé effectivement subi par les positives (0 pour le témoin « baryons seuls »)
+    double CrossPosEff => negNoFieldOnPositives && IsLss && lssModel == LssModel.Janus ? 0.0 : KappaSq;
 
     [Header("Hypothèse matière noire")]
     [Tooltip("Remplace le milieu de masses négatives par un halo sphérique de matière noire " +
@@ -445,6 +506,79 @@ public class JanusPMSimulation : MonoBehaviour
     public float negativeClockRatio = 1f;
     double Tau => IsLss && lssModel == LssModel.Janus && !JanusPhenoOn ? System.Math.Max(1e-3, (double)negativeClockRatio) : 1.0;
 
+    public enum NegCoupling
+    {
+        [InspectorName("χ̄ = χ (même constante)"), EnName("χ̄ = χ (same constant)")] Identique,
+        [InspectorName("χ̄ = χ / (c−/c+)⁴ (convention 2014)"), EnName("χ̄ = χ / (c−/c+)⁴ (2014 convention)")] C4,
+        [InspectorName("(c−/c+)² — limite newtonienne publiée"), EnName("(c−/c+)² — published Newtonian limit")] K2,
+        [InspectorName("Libre"), EnName("Free")] Libre
+    }
+    [UILabel("Constante gravitationnelle du secteur négatif χ̄/χ", En = "Negative-sector gravitational constant χ̄/χ")]
+    [ShowIf("IsLss & IsJanusLss")]
+    [Tooltip("Petit, Margnat & Zejli 2024 (éq. 107a-107b) introduisent deux constantes d'Einstein indépendantes, χ pour notre " +
+             "secteur et χ̄ pour le secteur négatif, sans publier leur rapport. Ce rapport n'est donc pas fixé par le modèle, " +
+             "et il multiplie toute la dynamique du secteur négatif (expansion de ā et forces subies par les masses négatives). " +
+             "χ̄ = χ : choix minimal, utilisé jusqu'ici. χ̄ = χ/(c−/c+)⁴ : convention de Petit & d'Agostini 2014, " +
+             "où χ = −8πG/c⁴ appliqué à chaque secteur avec sa propre vitesse de la lumière (κ⁴ = 10⁴ d'écart pour c−/c+ = 10). " +
+             "Les forces entre secteurs (κ² et 1/κ²) ne changent pas : seul le poids global du secteur négatif change. " +
+             "(c−/c+)² : valeur imposée par la limite newtonienne publiée. Les équations (3.3.72) à (3.3.75) de Zejli, " +
+             "avec Γ⁽ᵍ⁾ = Γ⁽ʰ⁾ = −8πG/c⁴, donnent un second membre de Poisson proportionnel à κ²(δρ− + δρ+/κ²)/ā³ pour " +
+             "le secteur négatif, contre (δρ+ + κ²δρ−)/a³ pour le nôtre. Le rapport |ā²ä−| / |a²ä+| vaut donc 1, alors " +
+             "que le code donne 1/κ² avec χ̄ = χ. ATTENTION : toutes les campagnes antérieures au 29/10/2026 ont utilisé " +
+             "χ̄ = χ, soit un secteur négatif κ² fois moins réactif que ce que demandent les équations publiées.")]
+    [TooltipEn("Petit, Margnat & Zejli 2024 (eqs. 107a-107b) introduce two independent Einstein constants, χ for our sector and χ̄ for the negative sector, without publishing their ratio. The ratio is therefore not fixed by the model, and it multiplies all of the negative sector's dynamics (expansion of ā and forces felt by the negative masses). χ̄ = χ: minimal choice, used so far. χ̄ = χ/(c−/c+)⁴: Petit & d'Agostini 2014 convention, where χ = −8πG/c⁴ is applied to each sector with its own speed of light (a factor κ⁴ = 10⁴ for c−/c+ = 10). The between-sector forces (κ² and 1/κ²) are unchanged: only the overall weight of the negative sector changes. (c−/c+)²: the value imposed by the published Newtonian limit. Zejli's equations (3.3.72) to (3.3.75), with Γ(g) = Γ(h) = −8πG/c⁴, give a Poisson source proportional to κ²(δρ− + δρ+/κ²)/ā³ for the negative sector against (δρ+ + κ²δρ−)/a³ for ours. The ratio |ā²ä−| / |a²ä+| is therefore 1, whereas the code gives 1/κ² with χ̄ = χ. WARNING: every campaign before 29/10/2026 used χ̄ = χ, i.e. a negative sector κ² times less responsive than the published equations require.")]
+    [UIPanel("Janus", En = "Janus", Single = true)]
+    public NegCoupling negCoupling = NegCoupling.Identique;
+    bool ChiLibre => negCoupling == NegCoupling.Libre;
+    [UILabel("Valeur de χ̄/χ", En = "Value of χ̄/χ")]
+    [ShowIf("IsLss & IsJanusLss & ChiLibre")]
+    [Tooltip("Rapport χ̄/χ imposé. 1 = même constante gravitationnelle dans les deux secteurs.")]
+    [TooltipEn("Imposed χ̄/χ ratio. 1 = same gravitational constant in both sectors.")]
+    [UIPanel("Janus", En = "Janus", Single = true)]
+    public float negChiRatio = 1f;
+    // χ̄/χ : rapport des constantes d'Einstein des deux secteurs (non fixé par les papiers)
+    double ChiRatio
+    {
+        get
+        {
+            if (!IsLss || lssModel != LssModel.Janus || JanusPhenoOn) return 1.0;
+            switch (negCoupling)
+            {
+                case NegCoupling.C4: return 1.0 / (KappaSq * KappaSq);
+                case NegCoupling.K2: return KappaSq;
+                case NegCoupling.Libre: return System.Math.Max(1e-9, (double)negChiRatio);
+                default: return 1.0;
+            }
+        }
+    }
+    // Multiplicateur unique de toute la dynamique du secteur négatif : χ̄/χ × (T−/T+)²
+    double NegDyn => ChiRatio * Tau * Tau;
+    // ATTENTION : le champ nommé « χ̄/χ » dans l'interface est en réalité NegDyn, le multiplicateur
+    // de la dynamique du secteur négatif. Le rapport des constantes d'Einstein du modèle en découle :
+    //     χ̄/χ (modèle) = NegDyn / κ²        car la limite newtonienne publiée exige NegDyn = κ²·(χ̄/χ)
+    // et comme χ = 8πG/c⁴ dans chaque secteur, χ̄/χ = (Ḡ/G)/κ⁴, donc :
+    //     Ḡ/G = (χ̄/χ)·κ⁴ = NegDyn·κ²
+    // Les deux diagnostics rendent visible l'hypothèse cachée : dire « les deux constantes sont égales »
+    // ne signifie pas la même chose pour les constantes d'Einstein et pour celles de Newton.
+    //   NegDyn = κ² ⇒ χ̄ = χ   et Ḡ/G = κ⁴    (constantes d'Einstein égales)
+    //   NegDyn = 1/κ² ⇒ Ḡ = G et χ̄/χ = 1/κ⁴  (constantes de Newton égales)
+    double ChiModel => ChiRatio / System.Math.Max(1e-12, KappaSq);
+    double NewtonRatio => ChiRatio * KappaSq;
+
+    [UILabel("ā/a imposé par c−/c+ (relation 26 de Petit)", En = "ā/a set by c−/c+ (Petit's relation 26)")]
+    [ShowIf("IsLss & expansionSelfConsistent & IsJanusLss & negativeOwnScaleFactor")]
+    [Tooltip("Petit & d'Agostini 2014, éq. (25)-(26) : dans l'ère radiative à constantes variables, c−/c+ ≈ √(a/ā), " +
+             "donc ā/a = 1 / (c−/c+)². Oui : le rapport ā/a n'est plus un réglage libre, il découle de c−/c+ " +
+             "(c−/c+ = 10 → ā/a = 0,01 ; c−/c+ = 0,1 → ā/a = 100). Non : la valeur réglée ci-dessous, indépendante de c−/c+. " +
+             "Attention : la relation est énoncée pour l'ère radiative, son prolongement à l'ère de matière n'est pas démontré. " +
+             "Petit écrit aussi que ā < a impose c− > c+, donc c−/c+ > 1.")]
+    [TooltipEn("Petit & d'Agostini 2014, eqs. (25)-(26): in the radiation era with variable constants, c−/c+ ≈ √(a/ā), hence ā/a = 1 / (c−/c+)². Yes: the ā/a ratio is no longer a free setting, it follows from c−/c+ (c−/c+ = 10 → ā/a = 0.01; c−/c+ = 0.1 → ā/a = 100). No: the value set below, independent of c−/c+. Caution: the relation is stated for the radiation era; its extension to the matter era is not demonstrated. Petit also writes that ā < a requires c− > c+, hence c−/c+ > 1.")]
+    [UIPanel("Janus", En = "Janus", Single = true)]
+    public bool negScaleFromKappa = false;
+    bool KappaScaleLink => negScaleFromKappa && IsLss && lssModel == LssModel.Janus;
+    // ā/a au départ effectivement utilisé (réglage libre, ou imposé par la relation (26))
+    public float NegScale0 => KappaScaleLink ? (float)(1.0 / KappaSq) : negativeScaleRatio;
+
     // vitesse initiale de ā imposée par la courbure k̄ = −1, en multiple de la vitesse parabolique
     double CurvatureLambda(double r0)
     {
@@ -452,8 +586,9 @@ public class JanusPMSimulation : MonoBehaviour
         double C = c8 * (KappaSq * RhoMedium - RhoPos);                     // (c/R)² de notre secteur (au rebond, H = 0)
         double par = c8 * System.Math.Abs(NegRhoEff) / System.Math.Max(1e-12, r0);
         if (par <= 0) return 1;
-        double rate2 = KappaSq * System.Math.Max(0.0, C) + (NegRhoEff >= 0 ? par : -par);
-        return System.Math.Sqrt(System.Math.Max(rate2, 1e-12 * par) / par);
+        double nd = System.Math.Max(1e-12, NegDyn);
+        double rate2 = KappaSq * System.Math.Max(0.0, C) + nd * (NegRhoEff >= 0 ? par : -par);
+        return System.Math.Sqrt(System.Math.Max(rate2, 1e-12 * par) / (nd * par));
     }
     [UILabel("Pas de temps automatique", En = "Automatic time step")]
     [ShowIf("IsLss & IsJanusLss")]
@@ -462,6 +597,17 @@ public class JanusPMSimulation : MonoBehaviour
     [TooltipEn("Reduces the time step when the negative medium becomes too dense or too fast for dt (step ≤ 0.1 × its dynamical time). Without it, results become wrong. The step never exceeds dt.")]
     [UIPanel("Janus", En = "Janus", Single = true)]
     public bool adaptiveTimestep = true;
+
+    [UILabel("Facteur sur le pas de temps", En = "Time-step factor")]
+    [ShowIf("IsLss")]
+    [Range(0.05f, 1f)]
+    [Tooltip("Multiplie le pas de temps effectif, celui de l'onglet Univers comme celui que le pas automatique calcule. " +
+             "1 = inchangé. Sert au test de convergence temporelle : si les mesures ne bougent pas entre 1, 0,5 et 0,25, " +
+             "l'intégration est convergée et les résultats ne sont pas un artefact du pas. Un facteur plus petit multiplie " +
+             "d'autant la durée du run. Liste de campagne « facteurs de pas de temps ».")]
+    [TooltipEn("Multiplies the effective time step, both the Universe tab's and the one the automatic step computes. 1 = unchanged. For the temporal convergence test: if the measurements do not move between 1, 0.5 and 0.25, the integration is converged and the results are not an artefact of the step. A smaller factor lengthens the run proportionally. Campaign list 'time-step factors'.")]
+    [UIPanel("Janus", En = "Janus", Single = true)]
+    public float timestepFactor = 1f;
 
     public enum JanusCalibration
     {
@@ -900,6 +1046,27 @@ public class JanusPMSimulation : MonoBehaviour
     [TooltipEn("List of clock ratios T−/T+ (exploratory, see the Janus tab), separated by ';' (e.g. 0.3; 1; 3). Names LSS_Janus_T3… Empty = the Janus tab value.")]
     [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
     public float[] lssJanusClocks = { };
+    [UILabel("Janus : rapports χ̄/χ", En = "Janus: χ̄/χ ratios")]
+    [ShowIf("batchMode & IsLss")]
+    [Tooltip("Liste de rapports χ̄/χ des constantes gravitationnelles des deux secteurs (voir l'onglet Janus), " +
+             "séparés par « ; » (ex. 1 ; 0,0001). Le rapport n'est pas fixé par les papiers de Petit : 1 est le choix minimal, " +
+             "1/(c−/c+)⁴ la convention de 2014 (0,0001 pour c−/c+ = 10). Noms LSS_Janus_chi0.0001… " +
+             "Vide = valeur de l'onglet Janus.")]
+    [TooltipEn("List of χ̄/χ ratios of the two sectors' gravitational constants (see the Janus tab), separated by ';' (e.g. 1; 0.0001). The ratio is not fixed by Petit's papers: 1 is the minimal choice, 1/(c−/c+)⁴ the 2014 convention (0.0001 for c−/c+ = 10). Names LSS_Janus_chi0.0001… Empty = the Janus tab value.")]
+    [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
+    public float[] lssJanusChis = { };
+    [UILabel("Janus : redshifts de bascule (phénoménologique)", En = "Janus: switch redshifts (phenomenological)")]
+    [ShowIf("batchMode & IsLss")]
+    [Tooltip("Liste de redshifts de bascule du couplage à signe variable (voir « Janus phénoménologique » dans l'onglet " +
+             "Janus), séparés par « ; » (ex. 0,5 ; 1 ; 2 ; 3,4). Avant la bascule le secteur négatif attire la matière " +
+             "ordinaire, après il la repousse. Sans effet si « Janus phénoménologique » n'est pas coché. " +
+             "Noms LSS_Janus_zs1… Vide = valeur de l'onglet Janus.")]
+    [TooltipEn("List of switch redshifts for the sign-changing coupling (see 'Phenomenological Janus' in the Janus tab), separated by ';' (e.g. 0.5; 1; 2; 3.4). Before the switch the negative sector attracts ordinary matter, after it repels it. No effect unless 'Phenomenological Janus' is ticked. Names LSS_Janus_zs1… Empty = the Janus tab value.")]
+    [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
+    public float[] lssJanusPhenoZs = { };
+    // Étiquette d'un rapport χ̄/χ dans le nom du run : scientifique en dessous de 10⁻⁴ (sinon 1e-6 donnerait « 0 »)
+    static string ChiTag(float x, System.Globalization.CultureInfo ci) =>
+        x != 0 && System.Math.Abs(x) < 1e-4f ? x.ToString("0.###E0", ci) : x.ToString("0.#####", ci);
     [UILabel("Janus : tester les deux champs initiaux négatifs", En = "Janus: test both initial negative fields")]
     [ShowIf("batchMode & IsLss & IsRealisticIC")]
     [Tooltip("Oui : chaque modèle Janus est lancé deux fois, champ initial du secteur négatif indépendant (_ind) puis " +
@@ -923,6 +1090,15 @@ public class JanusPMSimulation : MonoBehaviour
     [TooltipEn("List of levels separated by ';' (e.g. 1; 2; 3). Each selected model (Janus and controls) runs at every level: 1 = 128³ grid, 64³ + 75³ particles; 2 = 256³ grid, 96³ + 112³ (reference); 3 = 256³ grid, 128³ + 149³. The initial conditions are exactly the same modes at all levels: the initial spectrum is cut at the wavenumber of the coarsest level. Names LSS_…_r1, _r2, _r3. Empty = tab settings.")]
     [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
     public int[] lssResLevels = { };
+    [UILabel("Test de convergence : facteurs de pas de temps", En = "Convergence test: time-step factors")]
+    [ShowIf("batchMode & IsLss")]
+    [Tooltip("Liste de facteurs séparés par « ; » (ex. 1 ; 0,5 ; 0,25). Chaque modèle coché est lancé à chaque facteur, qui " +
+             "multiplie le pas de temps des particules et le sous-pas de l'intégration de ā. Si les mesures ne bougent pas " +
+             "d'un facteur au suivant, l'intégration est convergée. Noms LSS_…_dt0,5. Attention : diviser le pas par deux " +
+             "double la durée du run. Vide = facteur de l'onglet Janus.")]
+    [TooltipEn("List of factors separated by ';' (e.g. 1; 0.5; 0.25). Each selected model runs at every factor, which multiplies both the particle time step and the sub-step of the ā integration. If the measurements do not move from one factor to the next, the integration is converged. Names LSS_…_dt0.5. Note: halving the step doubles the run time. Empty = the Janus tab's factor.")]
+    [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
+    public float[] lssDtFactors = { };
     static readonly int[] ResGrid = { 0, 128, 256, 256 };
     static readonly int[] ResSide = { 0, 64, 96, 128 };
     static int ResNegSide(int side) => Mathf.RoundToInt(side * 112f / 96f);
@@ -1021,7 +1197,7 @@ public class JanusPMSimulation : MonoBehaviour
 
     // Vitesse d'expansion initiale de ā : lam × vitesse « parabolique » (juste suffisante pour ne pas se recontracter)
     double NegInitialRate(double r0, double lam) =>
-        lam * Tau * System.Math.Sqrt(8 * System.Math.PI * G * System.Math.Abs(NegRhoEff) / (3 * r0));
+        lam * System.Math.Sqrt(NegDyn) * System.Math.Sqrt(8 * System.Math.PI * G * System.Math.Abs(NegRhoEff) / (3 * r0));
 
     // Intègre ä = k/ā² de t0 à t1 (RK4, pas internes adaptés à la vitesse relative de ā)
     const double NegCollapse = 1e-6;          // ā en dessous : secteur effondré, on arrête d'intégrer
@@ -1049,7 +1225,7 @@ public class JanusPMSimulation : MonoBehaviour
         }
     }
 
-    double NegK => -4.0 / 3.0 * System.Math.PI * G * NegRhoEff * Tau * Tau;   // horloge T−/T+ : dynamique × (T−/T+)²
+    double NegK => -4.0 / 3.0 * System.Math.PI * G * NegRhoEff * NegDyn;      // χ̄/χ × (T−/T+)² : dynamique du secteur négatif
 
     // ā en fin de run (et ā minimal en cours de route) pour un départ (r0, lam)
     void NegRun(double r0, double lam, out double aEnd, out double aMin)
@@ -1059,7 +1235,7 @@ public class JanusPMSimulation : MonoBehaviour
         int n = 200;
         for (int i = 0; i < n; i++)
         {
-            IntegrateNeg(ref a, ref v, tEnd * i / n, tEnd * (i + 1) / n, NegK, System.Math.Max(1e-4, dt));
+            IntegrateNeg(ref a, ref v, tEnd * i / n, tEnd * (i + 1) / n, NegK, NegDtBase);
             if (a < aMin) aMin = a;
         }
         aEnd = a;
@@ -1070,11 +1246,20 @@ public class JanusPMSimulation : MonoBehaviour
     double NegLambda()
     {
         if (!NegTargetAtEnd)
-            return negativeRateFromCurvature ? CurvatureLambda(System.Math.Max(1e-4, negativeScaleRatio)) : negativeExpansionRate;
-        string key = $"{negativeScaleRatioEnd}|{negativeScaleRatio}|{LightSpeedRatio}|{RhoMedium}|{RhoPos}|{G}|{ExpansionEndTime()}|{expansionFactorEnd}|{dt}";
+            return negativeRateFromCurvature ? CurvatureLambda(System.Math.Max(1e-4, NegScale0)) : negativeExpansionRate;
+        string key = $"{negativeScaleRatioEnd}|{NegScale0}|{LightSpeedRatio}|{RhoMedium}|{RhoPos}|{G}|{ExpansionEndTime()}|{expansionFactorEnd}|{dt}|{NegDyn:R}";
         if (key == negSolveKey) return negSolveLam;
-        double r0 = System.Math.Max(1e-4, negativeScaleRatio), target = negativeScaleRatioEnd * expansionFactorEnd;
+        double r0 = System.Math.Max(1e-4, NegScale0), target = negativeScaleRatioEnd * expansionFactorEnd;
         double lo = 0, hi = 20;
+        // Élargit la fourchette avant de dichotomiser : la vitesse initiale vaut λ·√(NegDyn)·v_parabolique,
+        // donc le λ requis croît comme 1/√(χ̄/χ × (T−/T+)²) et dépasse 20 dès que ce facteur est petit.
+        // Sans cet élargissement, la dichotomie saturait silencieusement à 20 et ā/a visé n'était pas atteint.
+        for (int i = 0; i < 40 && hi < 1e9; i++)
+        {
+            NegRun(r0, hi, out double aHi, out _);
+            if (aHi >= target) break;
+            lo = hi; hi *= 2;
+        }
         for (int i = 0; i < 45; i++)
         {
             double mid = 0.5 * (lo + hi);
@@ -1090,18 +1275,85 @@ public class JanusPMSimulation : MonoBehaviour
     void ResetNegScale()
     {
         negT = 0;
-        negA = NegOwnScale ? System.Math.Max(1e-4, negativeScaleRatio) : 1.0;
+        negA = NegOwnScale ? System.Math.Max(1e-4, NegScale0) : 1.0;
         negLam = NegOwnScale ? NegLambda() : 0;
         negADot = NegOwnScale ? NegInitialRate(negA, negLam) : 0;
+        negE0 = NegOwnScale ? 0.5 * negADot * negADot + NegK / System.Math.Max(negA, 1e-9) : double.NaN;
+        epsPosMax = 0; epsNegMax = 0;
     }
 
+    // ---- Résidus des équations de Friedmann (contrôle d'intégration demandé en relecture) ----
+    // Secteur positif : les lois a(t) sont des formes analytiques fermées. Le résidu vérifie donc que la forme
+    //   résout bien l'équation, pas qu'une intégration a convergé ; il doit valoir ~10⁻¹⁶. S'il ne l'est pas,
+    //   c'est une erreur de signe ou de facteur dans la solution, et non du bruit numérique.
+    //   Janus (a = ch²v) : premier intégral ȧ² = (C/3)(1 − 1/a), C = 8πG(κ²ρ_m − ρ₊).
+    //   ΛCDM : H² = 8πG ρ_m /(3a³) + H_Λ².     Einstein-de Sitter : H² = 8πG ρ /(3a³).
+    // Secteur négatif : ā est intégré par RK4, donc son résidu mesure une vraie erreur d'intégration.
+    //   Premier intégral exact de ä = k/ā² : E = ȧ²/2 + k/ā, conservé. Il réagit au facteur de pas de temps.
+    static double Mx(double x, double y) => double.IsNaN(x) ? y : System.Math.Max(x, y);
+    double negE0 = double.NaN;
+    double epsPosMax, epsNegMax;
+    void FriedmannResiduals(double t, out double epsPos, out double epsNeg)
+    {
+        epsPos = double.NaN; epsNeg = double.NaN;
+        if (ExpansionOn && SelfConsistent)
+        {
+            double a = ScaleFactor(t), H = Hubble(t), aDot = a * H;
+            // Contrôle 1, valable pour les trois lois : H(t) est-il bien la dérivée logarithmique de a(t) ?
+            // Nécessaire parce que pour Janus l'identité ȧ² = (1 − 1/a)/s² est vraie pour tout v : le contrôle 2
+            // ci-dessous ne teste donc pas l'inversion t ↔ v, seulement la calibration de s. Plancher ≈ 10⁻¹⁰,
+            // l'erreur de la différence centrée, largement assez fin pour détecter un signe ou un facteur.
+            double hFd = System.Math.Max(1e-9, 1e-5 * System.Math.Max(t, 1.0));
+            if (t > hFd)
+            {
+                double aFd = (ScaleFactor(t + hFd) - ScaleFactor(t - hFd)) / (2 * hFd);
+                double scF = System.Math.Abs(aFd) + System.Math.Abs(aDot);
+                if (scF > 0) epsPos = System.Math.Abs(aFd - aDot) / scF;
+            }
+            if (EffectiveLaw == ExpansionLaw.JanusPetit && JanusSelfConsistentOk)
+            {
+                double C3 = 8 * System.Math.PI * G * (KappaSq * RhoMedium - RhoPos) / 3.0;
+                double lhs = aDot * aDot, rhs = C3 * (1.0 - 1.0 / System.Math.Max(a, 1e-12));
+                double sc = System.Math.Abs(lhs) + System.Math.Abs(rhs);
+                if (sc > 0) epsPos = Mx(epsPos, System.Math.Abs(lhs - rhs) / sc);
+            }
+            else if (EffectiveLaw == ExpansionLaw.LambdaCDM)
+            {
+                double Cm = 8 * System.Math.PI * G * (JanusPhenoOn ? RhoPos * LcdmOm / LcdmOb : RhoPos + RhoMedium) / 3.0;
+                double hl = LcdmHL(), mat = Cm / System.Math.Pow(System.Math.Max(a, 1e-12), 3);
+                double lhs = H * H, rhs = mat + hl * hl;
+                double sc = System.Math.Abs(lhs) + System.Math.Abs(rhs);
+                if (sc > 0) epsPos = Mx(epsPos, System.Math.Abs(lhs - rhs) / sc);
+            }
+            else if (EffectiveLaw == ExpansionLaw.EinsteinDeSitter)
+            {
+                double rho = lssModel == LssModel.Janus ? System.Math.Abs(RhoPos - KappaSq * RhoMedium) : RhoPos + RhoMedium;
+                double rhs = 8 * System.Math.PI * G * rho / 3.0 / System.Math.Pow(System.Math.Max(a, 1e-12), 3);
+                double lhs = H * H, sc = System.Math.Abs(lhs) + System.Math.Abs(rhs);
+                if (sc > 0) epsPos = Mx(epsPos, System.Math.Abs(lhs - rhs) / sc);
+            }
+        }
+        if (NegOwnScale && !double.IsNaN(negE0) && negA > NegCollapse * 1.001)
+        {
+            double kin = 0.5 * negADot * negADot, pot = NegK / System.Math.Max(negA, 1e-9);
+            double sc = kin + System.Math.Abs(pot);
+            if (sc > 0) epsNeg = System.Math.Abs(kin + pot - negE0) / sc;
+        }
+        if (!double.IsNaN(epsPos)) epsPosMax = System.Math.Max(epsPosMax, epsPos);
+        if (!double.IsNaN(epsNeg)) epsNegMax = System.Math.Max(epsNegMax, epsNeg);
+    }
+
+    // Facteur du test de convergence temporelle : s'applique au pas des particules comme au sous-pas de l'intégration de ā
+    double DtFactor => IsLss ? System.Math.Max(0.01, (double)timestepFactor) : 1.0;
+    double NegDtBase => System.Math.Max(1e-4, dt * DtFactor);
     // Pas de temps : ≤ dt, et ≤ 0,1 × temps dynamique du milieu négatif (densité « ressentie », facteur d'échelle propre)
     float StepDt(double t, double aNeg)
     {
-        if (!IsLss || lssModel != LssModel.Janus || !adaptiveTimestep) return dt;
-        double rhoFelt = System.Math.Max(RhoMedium, RhoPos / KappaSq) / (aNeg * aNeg * aNeg) * System.Math.Max(1.0, Tau * Tau);
+        double fac = DtFactor;   // test de convergence temporelle
+        if (!IsLss || lssModel != LssModel.Janus || !adaptiveTimestep) return (float)(dt * fac);
+        double rhoFelt = System.Math.Max(RhoMedium, RhoPos / KappaSq) / (aNeg * aNeg * aNeg) * System.Math.Max(1.0, NegDyn);
         double tDyn = 1.0 / System.Math.Sqrt(4 * System.Math.PI * G * rhoFelt);
-        return (float)System.Math.Max(1e-7, System.Math.Min(dt, 0.1 * tDyn));
+        return (float)System.Math.Max(1e-7, System.Math.Min(dt, 0.1 * tDyn) * fac);
     }
 
     // Estimation du nombre de pas (et de la durée) du run avec les réglages actuels
@@ -1112,9 +1364,10 @@ public class JanusPMSimulation : MonoBehaviour
         get
         {
             string key = $"{mode}|{lssModel}|{batchMode}|{expansionSelfConsistent}|{janusCalibration}|{janusMatchQ0}|{janusQ0Target}|" +
-                         $"{expansionFactorEnd}|{lssStartRedshift}|{negativeTotalMass}|{positiveTotalMass}|{boxSize}|{G}|{dt}|" +
-                         $"{LightSpeedRatio}|{negativeOwnScaleFactor}|{negativeScaleTarget}|{negativeScaleRatio}|{negativeScaleRatioEnd}|" +
-                         $"{negativeExpansionRate}|{negativeRateFromCurvature}|{negativeScaleRatio}|{adaptiveTimestep}|{(int)(msPerStep * 10)}|{JanusLang.English}";
+                         $"{expansionFactorEnd}|{lssStartRedshift}|{negativeTotalMass}|{positiveTotalMass}|{boxSize}|{G}|{dt}|{timestepFactor}|" +
+                         $"{LightSpeedRatio}|{negativeOwnScaleFactor}|{negativeScaleTarget}|{NegScale0}|{negativeScaleRatioEnd}|" +
+                         $"{negativeExpansionRate}|{negativeRateFromCurvature}|{negScaleFromKappa}|{negCoupling}|{negChiRatio}|" +
+                         $"{adaptiveTimestep}|{(int)(msPerStep * 10)}|{JanusLang.English}";
             if (key == estimateKey) return estimateCache;
             estimateKey = key;
             estimateCache = ComputeRunEstimate();
@@ -1133,7 +1386,7 @@ public class JanusPMSimulation : MonoBehaviour
             try
             {
                 double tEnd = ExpansionEndTime();
-                double r0 = NegOwnScale ? System.Math.Max(1e-4, negativeScaleRatio) : 1.0;
+                double r0 = NegOwnScale ? System.Math.Max(1e-4, NegScale0) : 1.0;
                 double lam = NegOwnScale ? NegLambda() : 0;
                 double a = r0, v = NegOwnScale ? NegInitialRate(r0, lam) : 0, aMin = r0;
                 double steps = 0, t = 0;
@@ -1143,7 +1396,7 @@ public class JanusPMSimulation : MonoBehaviour
                     double t1 = tEnd * (i + 1) / n;
                     double aN = NegOwnScale ? a : ScaleFactor(t);
                     steps += (t1 - t) / StepDt(t, aN);
-                    if (NegOwnScale) { IntegrateNeg(ref a, ref v, t, t1, NegK, System.Math.Max(1e-4, dt)); aMin = System.Math.Min(aMin, a); }
+                    if (NegOwnScale) { IntegrateNeg(ref a, ref v, t, t1, NegK, NegDtBase); aMin = System.Math.Min(aMin, a); }
                     t = t1;
                 }
                 string txt = L("Estimation du run Janus : ≈ ", "Janus run estimate: ≈ ") + $"{steps:N0}" + L(" pas", " steps");
@@ -1190,7 +1443,7 @@ public class JanusPMSimulation : MonoBehaviour
     void AdvanceNegScale(double t)
     {
         if (t <= negT) return;
-        IntegrateNeg(ref negA, ref negADot, negT, t, NegK, System.Math.Max(1e-4, dt));
+        IntegrateNeg(ref negA, ref negADot, negT, t, NegK, NegDtBase);
         negT = t;
     }
 
@@ -1328,7 +1581,7 @@ public class JanusPMSimulation : MonoBehaviour
         if (JanusPhenoOn)
         {
             double sK = PhenoS(aK);
-            compute.SetFloat("_CrossPos", (float)(KappaSq * sK));
+            compute.SetFloat("_CrossPos", (float)(CrossPosEff * sK));
             compute.SetFloat("_CrossNeg", (float)(sK / KappaSq));
         }
         compute.SetFloat("_GravScale", (float)(1.0 / (aK * aK * aK)));
@@ -1337,18 +1590,26 @@ public class JanusPMSimulation : MonoBehaviour
         {
             AdvanceNegScale(t);
             double hN = negADot / negA;
-            compute.SetFloat("_GravScaleNeg", (float)(Tau * Tau / (negA * negA * negA)));
+            compute.SetFloat("_GravScaleNeg", (float)(NegDyn / (negA * negA * negA)));
             compute.SetFloat("_VelDampNeg", (float)System.Math.Exp(-2.0 * hN * h));
         }
         else
         {
-            compute.SetFloat("_GravScaleNeg", (float)(Tau * Tau / (aK * aK * aK)));
+            compute.SetFloat("_GravScaleNeg", (float)(NegDyn / (aK * aK * aK)));
             compute.SetFloat("_VelDampNeg", (float)System.Math.Exp(-2.0 * Hubble(t) * h));
         }
     }
     int total, particleGroups, g8, g4;
     uint[] args = new uint[5];
     bool ready, readbackPending, lastShowNegatives;
+    // Mesure étalée : la mesure grande échelle coûte des centaines de millisecondes et tournait entièrement
+    // dans le callback de lecture GPU, donc sur une seule image — d'où le figeage de l'affichage et des boutons.
+    // Elle est maintenant exécutée par une coroutine qui rend la main entre chaque bloc. Le pas de simulation
+    // est suspendu pendant ce temps (la mesure porte sur un instant précis), mais l'interface reste vivante.
+    bool measuring;
+    NativeArray<Body> measureCopy;            // copie persistante : les données de la lecture GPU ne survivent pas au callback
+    Coroutine measureRoutine;
+    bool Busy => readbackPending || measuring;
     float simTime;
     int stepCount;
     string diagText = "";
@@ -1383,6 +1644,9 @@ public class JanusPMSimulation : MonoBehaviour
         public int resLevel = 0;             // test de convergence : niveau de résolution (0 = réglages de l'onglet)
         public float ns = float.NaN;         // Janus : indice spectral (NaN = onglet)
         public float clock = float.NaN;      // Janus : horloge T−/T+ (NaN = onglet)
+        public float chi = float.NaN;        // Janus : rapport χ̄/χ (NaN = onglet)
+        public float phenoZ = float.NaN;     // Janus phénoménologique : redshift de bascule (NaN = onglet)
+        public float dtFac = float.NaN;      // test de convergence temporelle : facteur sur le pas (NaN = onglet)
     }
 
     // Mesures accumulées pendant un run (fenêtre batchSummaryFrom → fin)
@@ -1425,6 +1689,15 @@ public class JanusPMSimulation : MonoBehaviour
     [Tooltip("Lance la simulation au démarrage. Décoché : attendre le bouton Lecture de l'interface.")]
     [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
     public bool autoStart = true;
+
+    [UILabel("Appliquer la référence au démarrage", En = "Apply the reference on startup")]
+    [Tooltip("Oui : au lancement, le logiciel applique la référence grande échelle choisie dans l'onglet Scénario " +
+             "avant de démarrer, et passe donc en mode grande échelle. C'est ce qui donne un état de départ " +
+             "identique à chaque lancement, quels que soient les réglages enregistrés dans la scène. " +
+             "Non : les réglages enregistrés sont utilisés tels quels, y compris le mode galaxie.")]
+    [TooltipEn("Yes: on launch the software applies the large-scale reference chosen in the Scenario tab before starting, and therefore switches to large-scale mode. This gives the same starting state on every launch, whatever is saved in the scene. No: the saved settings are used as they are, including galaxy mode.")]
+    [UIPanel("Scénario", En = "Scenario", Single = true)]
+    public bool applyReferenceOnStart = true;
     [UIHide]
     [Tooltip("Affichage texte des diagnostics par OnGUI (désactivé automatiquement par JanusUI)")]
     [UIPanel("Campagne", En = "Campaign", ShowIf = "batchMode", Single = true)]
@@ -1478,7 +1751,10 @@ public class JanusPMSimulation : MonoBehaviour
         resBackupGrid = 0; icNyqOverride = 0;
         if (!float.IsNaN(nsBackup)) lssSpectralIndex = nsBackup;
         if (!float.IsNaN(clockBackup)) negativeClockRatio = clockBackup;
-        nsBackup = float.NaN; clockBackup = float.NaN;
+        if (!float.IsNaN(chiBackup)) { negChiRatio = chiBackup; negCoupling = chiModeBackup; }
+        if (!float.IsNaN(phenoZBackup)) janusPhenoZ = phenoZBackup;
+        if (!float.IsNaN(dtFacBackup)) timestepFactor = dtFacBackup;
+        nsBackup = float.NaN; clockBackup = float.NaN; chiBackup = float.NaN; phenoZBackup = float.NaN; dtFacBackup = float.NaN;
     }
     float kappaBackup = float.NaN, negMassBackup = float.NaN;   // c−/c+ et |M−| de l'onglet
     int negFieldBackup = -1;
@@ -1487,6 +1763,7 @@ public class JanusPMSimulation : MonoBehaviour
 
     void Start()
     {
+        if (applyReferenceOnStart) ApplyReferenceConfigLss();   // état de départ reproductible, indépendant de la scène
         if (autoStart) StartSimulation();
     }
 
@@ -1526,6 +1803,9 @@ public class JanusPMSimulation : MonoBehaviour
         preparing = false; icTask = null; icCache = null; webIcJob = null;   // un calcul de conditions initiales en cours est abandonné
         runToken++;               // ignore les lectures GPU encore en vol
         readbackPending = false;
+        if (measureRoutine != null) { StopCoroutine(measureRoutine); measureRoutine = null; }
+        measuring = false;
+        if (measureCopy.IsCreated) measureCopy.Dispose();
         finishing = false;
         paused = false;
         if (csv != null) { csv.Flush(); csv.Close(); csv = null; JanusWeb.Sync(); }
@@ -1560,15 +1840,23 @@ public class JanusPMSimulation : MonoBehaviour
                          "GALAXY reference applied: 300,000 stars, 480,000 medium particles, c−/c+ = 1.");
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             string v = lssReference == LssReference.Petit ? L("Janus selon Petit", "Janus per Petit")
-                     : lssReference == LssReference.MeilleurSpectre ? L("Meilleur spectre", "Best spectrum")
+                     : lssReference == LssReference.MeilleurSpectre ? L("Meilleur spectre (NON CONFORME)", "Best spectrum (NON-COMPLIANT)")
+                     : lssReference == LssReference.Janus2014 ? L("Janus 2014 (χ̄/χ = 1/κ⁴)", "Janus 2014 (χ̄/χ = 1/κ⁴)")
+                     : lssReference == LssReference.Janus2014Courbure ? L("Janus 2014, courbure cohérente", "Janus 2014, consistent curvature")
+                     : lssReference == LssReference.Visuel ? L("Visuel rapide", "Fast visual")
+                     : lssReference == LssReference.Demarrage ? L("Démarrage (allégée)", "Startup (lightened)")
                      : L("Historique du 15/10", "Historical 15/10");
             return L("Référence GRANDE ÉCHELLE appliquée — ", "LARGE-SCALE reference applied — ") + v + " : " +
                    $"c−/c+ = {lightSpeedRatio.ToString("0.##", ci)}, |M−| = {negativeTotalMass.ToString("0.###E0", ci)}, " +
-                   $"ā/a₀ = {negativeScaleRatio.ToString("0.###", ci)}, q₀ = {janusQ0Target.ToString("0.###", ci)}, " +
+                   $"ā/a₀ = {NegScale0.ToString("0.###", ci)}, q₀ = {janusQ0Target.ToString("0.###", ci)}, " +
                    L("Janus σ₈ = ", "Janus σ₈ = ") + lssSigma8Janus.ToString("0.###", ci) + ", ΛCDM σ₈ = " + lssSigma8.ToString("0.##", ci) +
                    L(", boîte ", ", box ") + lssBoxMpc.ToString("0", ci) + " Mpc, " + $"{positiveCount} + {negativeCount} " +
-                   L("particules. Campagne : Janus + ΛCDM, listes vides. (Choix de la variante : onglet Scénario, « Référence grande échelle ».)",
-                     "particles. Campaign: Janus + ΛCDM, empty lists. (Variant choice: Scenario tab, 'Large-scale reference'.)");
+                   L("particules, mesures ", "particles, measurements ") +
+                   (lssOutputs == LssOutputs.Completes ? L("complètes", "full")
+                    : lssOutputs == LssOutputs.Allegees ? L("allégées (sans amas)", "lightened (no clusters)")
+                    : L("minimales", "minimal")) +
+                   L(". Campagne : Janus + ΛCDM, listes vides, mesures toujours complètes. (Choix de la variante : onglet Scénario, « Référence grande échelle ».)",
+                     ". Campaign: Janus + ΛCDM, empty lists, always full measurements. (Variant choice: Scenario tab, 'Large-scale reference'.)");
         }
     }
 
@@ -1600,36 +1888,100 @@ public class JanusPMSimulation : MonoBehaviour
         negativeOwnScaleFactor = true;
         negativeScaleTarget = NegScaleTarget.AuDepart;   // requis pour comparer des vitesses initiales en campagne
         negativeScaleRatio = 1f; negativeScaleRatioEnd = 0.3f; negativeExpansionRate = 1f;
-        adaptiveTimestep = true;
+        adaptiveTimestep = true; timestepFactor = 1f;
         janusCalibration = JanusCalibration.Densites;
         janusMatchQ0 = true; janusQ0Target = -0.09f;
         // Témoins de campagne
         lssRunJanus = true; lssRunMatiereNoire = false; lssRunPositivesSeules = false; lssRunMatiereNoireRealiste = false;
         lssRunLambdaCdm = true;
         lssNegRates = new float[0]; lssJanusSigma8s = new float[0];   // listes vides : valeurs ci-dessus pour tous
-        lssJanusKappas = new float[0]; lssResLevels = new int[0];
+        lssJanusKappas = new float[0]; lssResLevels = new int[0]; lssDtFactors = new float[0];
         lssJanusBothNegFields = false; lssJanusBothIc = false;
         lssJanusIc = LssJanusIc.VitessesNulles; lssJanusSigma8Today = false; janusPheno = false; negativeRateFromCurvature = false;
         negativeClockRatio = 1f; lssJanusNs = new float[0]; lssJanusClocks = new float[0];
+        negCoupling = NegCoupling.Identique; negChiRatio = 1f; negScaleFromKappa = false;
+        freezeNegatives = false; negNoFieldOnPositives = false;
+        lssJanusChis = new float[0]; lssJanusPhenoZs = new float[0];
+        lssOutputs = LssOutputs.Completes;
         switch (lssReference)
         {
             case LssReference.Petit:
                 // valeurs publiées les plus probables (c− ≈ 10 c+, ā/a ≈ 1/100) ; κ²|M−| = 4,6 M+ garde H₀ ≈ 67 ;
                 // σ₈ = 0,04 : contraste de ΛCDM (campagne 20261024_180814)
+                // ā/a = 1/κ² : cohérent avec la relation (26) de Petit & d'Agostini 2014
                 lightSpeedRatio = 10f; negativeTotalMass = 1600f; negativeScaleRatio = 0.01f;
                 lssSigma8Janus = 0.04f; janusQ0Target = -0.09f;
+                negScaleFromKappa = true;
                 break;
             case LssReference.MeilleurSpectre:
                 // départ z = 20 : forme du spectre la plus proche de ΛCDM (campagne 20261021_123506)
+                // ATTENTION : c−/c+ = 0,1 avec ā/a = 1 viole la relation (26) (qui imposerait ā/a = 100)
+                // et l'inégalité c− > c+ énoncée par Petit. Ce n'est pas une configuration Janus au sens de Petit.
                 lightSpeedRatio = 0.1f; negativeTotalMass = 7070000f; negativeScaleRatio = 1f;
                 lssSigma8Janus = 0.1f; janusQ0Target = -0.025f;
+                break;
+            case LssReference.Janus2014:
+                // Configuration la plus proche des observations à ce jour, conforme aux équations publiées
+                // (campagne 20261028_112604) : paramètres de Petit, χ̄/χ = 1/κ⁴ (convention 2014),
+                // ā/a verrouillé par la relation (26), et σ₈ lu comme le σ₈ linéaire final, comme ΛCDM.
+                lightSpeedRatio = 10f; negativeTotalMass = 1600f; negativeScaleRatio = 0.01f;
+                janusQ0Target = -0.09f;
+                negScaleFromKappa = true;
+                negCoupling = NegCoupling.C4;
+                lssJanusSigma8Today = true; lssSigma8Janus = 0.81f;
+                break;
+            case LssReference.Janus2014Courbure:
+                // Même configuration que Janus 2014, mais la vitesse initiale de ā n'est plus la vitesse parabolique :
+                // elle découle de l'équation de Friedmann du secteur négatif avec la même courbure k̄ = −1 que notre
+                // secteur. CurvatureLambda tient compte de χ̄/χ, donc λ est recalculé pour chaque valeur du rapport.
+                // Les deux références ne donnent pas le même ā/a : c'est précisément ce que cette variante teste.
+                lightSpeedRatio = 10f; negativeTotalMass = 1600f; negativeScaleRatio = 0.01f;
+                janusQ0Target = -0.09f;
+                negScaleFromKappa = true;
+                negCoupling = NegCoupling.C4;
+                lssJanusSigma8Today = true; lssSigma8Janus = 0.81f;
+                negativeRateFromCurvature = true;
+                break;
+            case LssReference.Demarrage:
+                // Référence appliquée au démarrage. Physique IDENTIQUE à « Janus 2014 », la configuration la plus
+                // proche des observations (§ 7.17), et témoin ΛCDM actif aux paramètres de Planck. Seuls la boîte,
+                // la résolution et le niveau de mesure sont réduits, pour que l'affichage reste fluide.
+                // ATTENTION : les chiffres produits dans cette configuration ne sont pas comparables aux campagnes
+                // publiées. La boîte de 200 Mpc et la grille 128³ déplacent la fonction de masse des amas (§ 6.1) ;
+                // pour un résultat, repasser sur « Janus 2014 », qui rétablit 400 Mpc, 256³ et les mesures complètes.
+                lightSpeedRatio = 10f; negativeTotalMass = 1600f; negativeScaleRatio = 0.01f;
+                janusQ0Target = -0.09f;
+                negScaleFromKappa = true;
+                negCoupling = NegCoupling.C4;
+                lssJanusSigma8Today = true; lssSigma8Janus = 0.81f;
+                lssSigma8 = 0.81f; lssSpectralIndex = 0.965f;        // ΛCDM : Planck (déjà la base, rappelé ici)
+                boxSize = 200f; lssBoxMpc = 200f; gridSize = 128;
+                positiveCount = 262144; negativeCount = 421875;      // 64³ et 75³ : réseaux complets
+                lssSamples = 8;                                       // 8 mesures au lieu de 20
+                lssRunJanus = true; lssRunLambdaCdm = true;           // les deux modèles si l'on lance une campagne
+                lssOutputs = LssOutputs.Allegees;                     // bloc amas coupé hors campagne
+                showNegatives = true;
+                break;
+            case LssReference.Visuel:
+                // Démonstration à l'écran : même physique que Janus 2014, mais boîte et résolution réduites
+                // et presque aucune mesure, pour que le run tourne en quelques minutes. Pas un résultat.
+                lightSpeedRatio = 10f; negativeTotalMass = 1600f; negativeScaleRatio = 0.01f;
+                janusQ0Target = -0.09f;
+                negScaleFromKappa = true;
+                negCoupling = NegCoupling.C4;
+                lssJanusSigma8Today = true; lssSigma8Janus = 0.81f;
+                boxSize = 200f; lssBoxMpc = 200f; gridSize = 128;
+                positiveCount = 262144; negativeCount = 421875;      // 64³ et 75³
+                lssSamples = 6;                                       // fenêtre de synthèse : celle du bloc de base (a = 3)
+                lssRunLambdaCdm = false;                              // un seul run : Janus
+                showNegatives = true;
                 break;
             default:
                 // configuration du 15/10/2026
                 lssBoxMpc = 200f;
                 break;
         }
-        if (JanusWeb.IsWeb)
+        if (JanusWeb.IsWeb && lssReference != LssReference.Visuel)
         {
             // version web allégée : grille 128³, 64³ particules ordinaires et 75³ de milieu (même rapport qu'en 96³ / 112³)
             gridSize = 128; positiveCount = 262144; negativeCount = 421875;
@@ -1699,6 +2051,7 @@ public class JanusPMSimulation : MonoBehaviour
             janusIcBackup = (int)lssJanusIc;
             resBackupGrid = gridSize; resBackupPos = positiveCount; resBackupNeg = negativeCount;
             nsBackup = lssSpectralIndex; clockBackup = negativeClockRatio;
+            chiBackup = negChiRatio; chiModeBackup = negCoupling; phenoZBackup = janusPhenoZ; dtFacBackup = timestepFactor;
             icNyqOverride = ResNyquist();
             runIndex = -1;
             doneStats.Clear();
@@ -1728,9 +2081,9 @@ public class JanusPMSimulation : MonoBehaviour
         if (IsLss && SelfConsistent && negativeOwnScaleFactor && lssModel == LssModel.Janus && !JanusPhenoOn)
         {
             var saved = lssModel; lssModel = LssModel.Janus;
-            NegRun(System.Math.Max(1e-4, negativeScaleRatio), NegLambda(), out double aEndN, out double aMinN);
+            NegRun(System.Math.Max(1e-4, NegScale0), NegLambda(), out double aEndN, out double aMinN);
             lssModel = saved;
-            if (aMinN < 1e-3 * negativeScaleRatio)
+            if (aMinN < 1e-3 * NegScale0)
                 return Fail(L("avec ces réglages, le secteur négatif s'effondre sur lui-même avant la fin (ā → 0). ",
                               "with these settings the negative sector collapses onto itself before the end (ā → 0). ") +
                             (NegTargetAtEnd
@@ -1794,31 +2147,39 @@ public class JanusPMSimulation : MonoBehaviour
                 int[] ics = lssJanusBothIc && IsRealisticIC ? new[] { 0, 1 } : new[] { -1 };
                 float[] nss = lssJanusNs != null && lssJanusNs.Length > 0 && IsRealisticIC ? lssJanusNs : new[] { float.NaN };
                 float[] clks = lssJanusClocks != null && lssJanusClocks.Length > 0 ? lssJanusClocks : new[] { float.NaN };
+                float[] chis = lssJanusChis != null && lssJanusChis.Length > 0 ? lssJanusChis : new[] { float.NaN };
+                float[] pzs = lssJanusPhenoZs != null && lssJanusPhenoZs.Length > 0 && janusPheno ? lssJanusPhenoZs : new[] { float.NaN };
                 foreach (float nsv in nss)
                     foreach (float clk in clks)
-                        foreach (float r in rates)
-                            foreach (float s8 in s8s)
-                                foreach (float kp in ks)
-                                    foreach (int nf in fields)
-                                        foreach (int ic in ics)
-                                            models.Add(new Scenario
-                                            {
-                                                name = "LSS_Janus" + (float.IsNaN(r) ? "" : "_v" + r.ToString("0.###", ci))
-                                                                   + (float.IsNaN(s8) ? "" : "_s8_" + s8.ToString("0.###", ci))
-                                                                   + (float.IsNaN(kp) ? "" : "_k" + kp.ToString("0.###", ci))
-                                                                   + (nf < 0 ? "" : nf == 0 ? "_ind" : "_anti")
-                                                                   + (ic < 0 ? "" : ic == 0 ? "_v0" : "_mc")
-                                                                   + (float.IsNaN(nsv) ? "" : "_ns" + nsv.ToString("0.###", ci))
-                                                                   + (float.IsNaN(clk) ? "" : "_T" + clk.ToString("0.###", ci)),
-                                                lss = LssModel.Janus,
-                                                negRate = r,
-                                                sigma8 = s8,
-                                                kappa = kp,
-                                                negField = nf,
-                                                janusIc = ic,
-                                                ns = nsv,
-                                                clock = clk
-                                            });
+                        foreach (float chv in chis)
+                            foreach (float pzv in pzs)
+                                foreach (float r in rates)
+                                    foreach (float s8 in s8s)
+                                        foreach (float kp in ks)
+                                            foreach (int nf in fields)
+                                                foreach (int ic in ics)
+                                                    models.Add(new Scenario
+                                                    {
+                                                        name = "LSS_Janus" + (float.IsNaN(r) ? "" : "_v" + r.ToString("0.###", ci))
+                                                                           + (float.IsNaN(s8) ? "" : "_s8_" + s8.ToString("0.###", ci))
+                                                                           + (float.IsNaN(kp) ? "" : "_k" + kp.ToString("0.###", ci))
+                                                                           + (nf < 0 ? "" : nf == 0 ? "_ind" : "_anti")
+                                                                           + (ic < 0 ? "" : ic == 0 ? "_v0" : "_mc")
+                                                                           + (float.IsNaN(nsv) ? "" : "_ns" + nsv.ToString("0.###", ci))
+                                                                           + (float.IsNaN(clk) ? "" : "_T" + clk.ToString("0.###", ci))
+                                                                           + (float.IsNaN(chv) ? "" : "_chi" + ChiTag(chv, ci))
+                                                                           + (float.IsNaN(pzv) ? "" : "_zs" + pzv.ToString("0.###", ci)),
+                                                        lss = LssModel.Janus,
+                                                        negRate = r,
+                                                        sigma8 = s8,
+                                                        kappa = kp,
+                                                        negField = nf,
+                                                        janusIc = ic,
+                                                        ns = nsv,
+                                                        clock = clk,
+                                                        chi = chv,
+                                                        phenoZ = pzv
+                                                    });
             }
             if (lssRunMatiereNoire && legacy) models.Add(new Scenario { name = "LSS_MatiereNoire", lss = LssModel.MatiereNoire });
             if (lssRunPositivesSeules && legacy) models.Add(new Scenario { name = "LSS_PositivesSeules", lss = LssModel.PositivesSeules });
@@ -1845,7 +2206,37 @@ public class JanusPMSimulation : MonoBehaviour
                             janusIc = m.janusIc,
                             resLevel = l,
                             ns = m.ns,
-                            clock = m.clock
+                            clock = m.clock,
+                            chi = m.chi,
+                            phenoZ = m.phenoZ,
+                            dtFac = m.dtFac
+                        });
+                models = expanded;
+            }
+            // test de convergence temporelle : chaque modèle à chaque facteur de pas de temps
+            var dtf = new System.Collections.Generic.List<float>();
+            if (lssDtFactors != null)
+                foreach (float f in lssDtFactors) if (f > 0.009f && f <= 1.001f && !dtf.Contains(f)) dtf.Add(f);
+            if (dtf.Count > 0)
+            {
+                var expanded = new System.Collections.Generic.List<Scenario>();
+                foreach (var m in models)
+                    foreach (float f in dtf)
+                        expanded.Add(new Scenario
+                        {
+                            name = m.name + "_dt" + f.ToString("0.###", ci),
+                            lss = m.lss,
+                            negRate = m.negRate,
+                            sigma8 = m.sigma8,
+                            kappa = m.kappa,
+                            negField = m.negField,
+                            janusIc = m.janusIc,
+                            resLevel = m.resLevel,
+                            ns = m.ns,
+                            clock = m.clock,
+                            chi = m.chi,
+                            phenoZ = m.phenoZ,
+                            dtFac = f
                         });
                 models = expanded;
             }
@@ -1856,7 +2247,7 @@ public class JanusPMSimulation : MonoBehaviour
         if (batchSeeds == null) return;
         foreach (int s in batchSeeds)
             foreach (var m in models)
-                queue.Add(new Scenario { name = m.name, darkMatter = m.darkMatter, profile = m.profile, freeze = m.freeze, seed = s, lss = m.lss, negRate = m.negRate, sigma8 = m.sigma8, kappa = m.kappa, negField = m.negField, janusIc = m.janusIc, resLevel = m.resLevel, ns = m.ns, clock = m.clock });
+                queue.Add(new Scenario { name = m.name, darkMatter = m.darkMatter, profile = m.profile, freeze = m.freeze, seed = s, lss = m.lss, negRate = m.negRate, sigma8 = m.sigma8, kappa = m.kappa, negField = m.negField, janusIc = m.janusIc, resLevel = m.resLevel, ns = m.ns, clock = m.clock, chi = m.chi, phenoZ = m.phenoZ, dtFac = m.dtFac });
     }
 
     // Réglages d'un run de campagne (utilisé aussi par le plan de lancement)
@@ -1865,8 +2256,8 @@ public class JanusPMSimulation : MonoBehaviour
         seed = sc.seed;
         darkMatterHalo = sc.darkMatter;
         dmProfile = sc.profile;
-        freezeNegatives = sc.freeze;
-        if (IsLss) { lssModel = sc.lss; darkMatterHalo = false; freezeNegatives = false; }
+        if (IsLss) { lssModel = sc.lss; darkMatterHalo = false; }   // le témoin « milieu figé » garde la valeur de l'onglet
+        else freezeNegatives = sc.freeze;
         if (IsLss && !float.IsNaN(sc.negRate)) negativeExpansionRate = sc.negRate;
         else if (IsLss && !float.IsNaN(negRateBackup)) negativeExpansionRate = negRateBackup;
         if (IsLss && !float.IsNaN(sc.sigma8)) lssSigma8Janus = sc.sigma8;            // σ₈ propre à ce run Janus
@@ -1882,6 +2273,13 @@ public class JanusPMSimulation : MonoBehaviour
         if (IsLss && janusIcBackup >= 0) lssJanusIc = sc.janusIc >= 0 ? (LssJanusIc)sc.janusIc : (LssJanusIc)janusIcBackup;
         if (IsLss && !float.IsNaN(nsBackup)) lssSpectralIndex = !float.IsNaN(sc.ns) ? sc.ns : nsBackup;
         if (IsLss && !float.IsNaN(clockBackup)) negativeClockRatio = !float.IsNaN(sc.clock) ? sc.clock : clockBackup;
+        if (IsLss && !float.IsNaN(phenoZBackup)) janusPhenoZ = !float.IsNaN(sc.phenoZ) ? sc.phenoZ : phenoZBackup;
+        if (IsLss && !float.IsNaN(dtFacBackup)) timestepFactor = !float.IsNaN(sc.dtFac) ? sc.dtFac : dtFacBackup;
+        if (IsLss && !float.IsNaN(chiBackup))
+        {
+            if (!float.IsNaN(sc.chi)) { negChiRatio = sc.chi; negCoupling = NegCoupling.Libre; }
+            else { negChiRatio = chiBackup; negCoupling = chiModeBackup; }
+        }
         if (IsLss && resBackupGrid > 0)
         {
             if (sc.resLevel > 0)
@@ -1895,7 +2293,9 @@ public class JanusPMSimulation : MonoBehaviour
         }
     }
     int resBackupGrid = 0, resBackupPos = 0, resBackupNeg = 0;
-    float nsBackup = float.NaN, clockBackup = float.NaN;
+    float nsBackup = float.NaN, clockBackup = float.NaN, chiBackup = float.NaN, phenoZBackup = float.NaN;
+    float dtFacBackup = float.NaN;
+    NegCoupling chiModeBackup = NegCoupling.Identique;
     // coupure commune : niveau le plus grossier de la liste
     int ResNyquist()
     {
@@ -1935,6 +2335,7 @@ public class JanusPMSimulation : MonoBehaviour
                 negFieldBackup = (int)lssNegField; janusIcBackup = (int)lssJanusIc;
                 resBackupGrid = gridSize; resBackupPos = positiveCount; resBackupNeg = negativeCount;
                 nsBackup = lssSpectralIndex; clockBackup = negativeClockRatio;
+                chiBackup = negChiRatio; chiModeBackup = negCoupling; phenoZBackup = janusPhenoZ; dtFacBackup = timestepFactor;
                 BuildQueue();
                 int nSeeds = batchSeeds != null ? batchSeeds.Length : 0;
                 var seen = new System.Collections.Generic.HashSet<string>();
@@ -1961,9 +2362,16 @@ public class JanusPMSimulation : MonoBehaviour
                 {
                     sb.Append($"c−/c+ = {LightSpeedRatio.ToString("0.###", ci)}, |M−| = {negativeTotalMass.ToString("0.###E0", ci)}, " +
                               $"κ²|M−|/M+ = {(KappaSq * negativeTotalMass / System.Math.Max(1e-30, positiveTotalMass)).ToString("0.##", ci)}");
-                    if (NegOwnScale) sb.Append($", ā/a₀ = {negativeScaleRatio.ToString("0.###", ci)}, λ = {NegLambda().ToString("0.###", ci)}" +
+                    if (NegOwnScale) sb.Append($", ā/a₀ = {NegScale0.ToString("0.###", ci)}" +
+                                               (KappaScaleLink ? L(" (= 1/κ², relation 26)", " (= 1/κ², relation 26)") : "") +
+                                               $", λ = {NegLambda().ToString("0.###", ci)}" +
                                                (negativeRateFromCurvature ? L(" (courbure)", " (curvature)") : ""));
                     if (Tau != 1.0) sb.Append($", T−/T+ = {Tau.ToString("0.###", ci)}");
+                    if (ChiRatio != 1.0) sb.Append($", χ̄/χ = {ChiRatio.ToString("0.#####E0", ci)}" +
+                                                   (negCoupling == NegCoupling.C4 ? L(" (1/κ⁴, 2014)", " (1/κ⁴, 2014)") :
+                                                    negCoupling == NegCoupling.K2 ? L(" (κ², limite newtonienne)", " (κ², Newtonian limit)") : ""));
+                    if (janus) sb.Append($", χ̄/χ du modèle = {ChiModel.ToString("0.#####E0", ci)}" +
+                                         $", Ḡ/G = {NewtonRatio.ToString("0.#####E0", ci)}");
                     if (IsRealisticIC) sb.Append($", n_s = {lssSpectralIndex.ToString("0.###", ci)}");
                     if (JanusPhenoOn) sb.Append(L(", PHÉNOMÉNOLOGIQUE (bascule z = ", ", PHENOMENOLOGICAL (switch z = ") + $"{janusPhenoZ.ToString("0.##", ci)})");
                     if (IsRealisticIC) sb.Append($", σ₈ = {EffSigma8.ToString("0.###", ci)}" + (lssJanusSigma8Today ? L(" (linéaire final)", " (final linear)") : "") +
@@ -1997,7 +2405,10 @@ public class JanusPMSimulation : MonoBehaviour
             resBackupGrid = 0;
             if (!float.IsNaN(nsBackup)) lssSpectralIndex = nsBackup;
             if (!float.IsNaN(clockBackup)) negativeClockRatio = clockBackup;
-            nsBackup = float.NaN; clockBackup = float.NaN;
+            if (!float.IsNaN(chiBackup)) { negChiRatio = chiBackup; negCoupling = chiModeBackup; }
+            if (!float.IsNaN(phenoZBackup)) janusPhenoZ = phenoZBackup;
+            if (!float.IsNaN(dtFacBackup)) timestepFactor = dtFacBackup;
+            nsBackup = float.NaN; clockBackup = float.NaN; chiBackup = float.NaN; phenoZBackup = float.NaN; dtFacBackup = float.NaN;
             queue = null;
         }
         return sb.ToString();
@@ -2124,11 +2535,12 @@ public class JanusPMSimulation : MonoBehaviour
         compute.SetFloat("_VelDamp", 1f);
         compute.SetFloat("_GravScaleNeg", 1f);
         compute.SetFloat("_VelDampNeg", 1f);
-        compute.SetFloat("_CrossPos", (float)KappaSq);
+        compute.SetFloat("_CrossPos", (float)CrossPosEff);
         compute.SetFloat("_CrossNeg", (float)(1.0 / KappaSq));
         compute.SetFloat("_FixScale", FixScale);
         compute.SetFloat("_SmoothLen", smoothingLength);
-        compute.SetInt("_FreezeNegatives", freezeNegatives ? 1 : 0);
+        // jamais appliqué aux modèles témoins : figer la matière noire de ΛCDM n'aurait aucun sens
+        compute.SetInt("_FreezeNegatives", freezeNegatives && (!IsLss || lssModel == LssModel.Janus) ? 1 : 0);
         compute.SetInt("_NG", gasGridSize);
         compute.SetInt("_GasN", GasCount);
         compute.SetFloat("_GasFix", GasFix);
@@ -2578,7 +2990,7 @@ public class JanusPMSimulation : MonoBehaviour
     {
         bool own = NegOwnScale;
         double lam = own ? NegLambda() : 0;
-        string key = $"{RhoPos:R}|{RhoMedium:R}|{KappaSq:R}|{G}|{expansionFactorEnd}|{own}|{negativeScaleRatio}|{lam:R}|{Tau:R}|" +
+        string key = $"{RhoPos:R}|{RhoMedium:R}|{KappaSq:R}|{G}|{expansionFactorEnd}|{own}|{NegScale0}|{lam:R}|{NegDyn:R}|" +
                      $"{lssNegField}|{janusCalibration}|{SelfConsistent}|{ExpansionOn}|{lssModel}";
         if (linCache != null && linCache.key == key) return linCache;
         var res = new LinearGrowth { key = key };
@@ -2588,8 +3000,8 @@ public class JanusPMSimulation : MonoBehaviour
         if (!(tE > 0) || double.IsInfinity(tE) || double.IsNaN(tE)) return res;
         res.tEnd = tE;
 
-        double rp = RhoPos, rm = RhoMedium, k2 = KappaSq, c = 4 * System.Math.PI * G, nk = NegK, tau2 = Tau * Tau;
-        double ab0 = own ? System.Math.Max(1e-4, negativeScaleRatio) : 1.0;
+        double rp = RhoPos, rm = RhoMedium, k2 = KappaSq, c = 4 * System.Math.PI * G, nk = NegK, tau2 = NegDyn;
+        double ab0 = own ? System.Math.Max(1e-4, NegScale0) : 1.0;
         double abd0 = own ? NegInitialRate(ab0, lam) : 0;
         // pas : ≤ 1/20 du temps dynamique le plus court au départ (secteur négatif), entre tE/4000 et tE/100000
         double rhoFast = System.Math.Max(rm, rp / k2) / (ab0 * ab0 * ab0);
@@ -3193,7 +3605,7 @@ public class JanusPMSimulation : MonoBehaviour
         if (batchMode && finishing && !paused)
         {
             if (finalSampleDone) { EndRun(); StartNextRun(); }
-            else if (!readbackPending) RequestReadback(true);   // mesure finale (ou nouvel essai)
+            else if (!Busy) RequestReadback(true);   // mesure finale (ou nouvel essai)
             if (!ready) return;
         }
 
@@ -3221,7 +3633,7 @@ public class JanusPMSimulation : MonoBehaviour
         {
             stepsDone++;
             // expansion auto-cohérente : on attend chaque mesure (runs courts, sinon des mesures en a seraient sautées)
-            if (SelfConsistent && readbackPending) break;
+            if (SelfConsistent && Busy) break;
             // leapfrog à pas variable : drift de curDt, puis kick de (curDt + pas suivant) / 2
             compute.SetFloat("_Dt", curDt);
             compute.Dispatch(kDrift, particleGroups, 1, 1);
@@ -3237,6 +3649,7 @@ public class JanusPMSimulation : MonoBehaviour
             simTime += curDt;
             curDt = nextDt;
             stepCount++;
+            FriedmannResiduals(simTime, out _, out _);   // contrôle d'intégration (max suivi sur tout le run)
 
             if (GasCount > 0)
             {
@@ -3256,19 +3669,19 @@ public class JanusPMSimulation : MonoBehaviour
             if (batchMode && endReached)
             {
                 finishing = true;
-                if (!readbackPending) RequestReadback(true);
+                if (!Busy) RequestReadback(true);
             }
             else if (SelfConsistent)
             {
                 // mesures régulièrement espacées en a (les durées diffèrent beaucoup d'un modèle à l'autre)
-                if (ScaleFactor(simTime) >= nextSampleA && !readbackPending)
+                if (ScaleFactor(simTime) >= nextSampleA && !Busy)
                 {
                     RequestReadback();
                     double stepA = (expansionFactorEnd - 1.0) / Mathf.Max(1, lssSamples);
                     while (nextSampleA <= ScaleFactor(simTime)) nextSampleA += stepA;
                 }
             }
-            else if (diagnosticEverySteps > 0 && stepCount % diagnosticEverySteps == 0 && !readbackPending)
+            else if (diagnosticEverySteps > 0 && stepCount % diagnosticEverySteps == 0 && !Busy)
                 RequestReadback();
         }
 
@@ -3330,7 +3743,16 @@ public class JanusPMSimulation : MonoBehaviour
         readbackPending = false;
         if (!ready || req.hasError) return;
         NativeArray<Body> data = req.GetData<Body>();
-        if (IsLss) { OnReadbackLss(data, isFinal); return; }
+        if (IsLss)
+        {
+            if (measuring) return;                       // une mesure à la fois
+            if (measureCopy.IsCreated) measureCopy.Dispose();
+            measureCopy = new NativeArray<Body>(data.Length, Allocator.Persistent);
+            measureCopy.CopyFrom(data);                  // la mémoire de req est libérée à la sortie du callback
+            measuring = true;
+            measureRoutine = StartCoroutine(MeasureLssRoutine(isFinal, token));
+            return;
+        }
 
         const int H = 32;
         var hp = new int[H * H * H];
@@ -3706,7 +4128,19 @@ public class JanusPMSimulation : MonoBehaviour
         c *= 1.0 - 2.0 / 3.0 * sn * sn;
     }
 
-    void OnReadbackLss(NativeArray<Body> data, bool isFinal)
+    // Pilote de la mesure étalée : avance la mesure d'un bloc par image, puis libère la copie.
+    // Le nettoyage est ici et non dans la mesure elle-même, pour qu'il ait lieu même sur un « yield break ».
+    System.Collections.IEnumerator MeasureLssRoutine(bool isFinal, int token)
+    {
+        var step = OnReadbackLss(measureCopy, isFinal);
+        yield return null;                              // la copie des particules a déjà coûté cette image
+        while (token == runToken && step.MoveNext()) yield return null;
+        measuring = false;
+        measureRoutine = null;
+        if (measureCopy.IsCreated) measureCopy.Dispose();
+    }
+
+    System.Collections.IEnumerator OnReadbackLss(NativeArray<Body> data, bool isFinal)
     {
         int N = LssNG, N3 = N * N * N;
         var cb = new double[N3];   // comptes CIC, matière ordinaire
@@ -3732,8 +4166,9 @@ public class JanusPMSimulation : MonoBehaviour
                 arr[ix + N * (iy + N * iz)] += w;
             }
         }
-        if (nb == 0 || nm == 0) { diagText = L("LSS : population vide, mesure impossible", "LSS: empty population, no measurement possible"); return; }
+        if (nb == 0 || nm == 0) { diagText = L("LSS : population vide, mesure impossible", "LSS: empty population, no measurement possible"); yield break; }
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- statistiques sur la grille 32³ (cellules de 2×2×2)
         int M = N / 2, M3 = M * M * M;
         var db = new double[M3]; var dm = new double[M3];
@@ -3760,6 +4195,7 @@ public class JanusPMSimulation : MonoBehaviour
         double sigB = System.Math.Sqrt(sb2 / M3), sigM = System.Math.Sqrt(sm2 / M3);
         double corr = sigB > 0 && sigM > 0 ? sbm / M3 / (sigB * sigM) : double.NaN;
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- spectres : une seule FFT complexe pour les deux champs réels (δb + i δm)
         double mean64b = nb / (double)N3, mean64m = nm / (double)N3;
         var re = new double[N3]; var im = new double[N3];
@@ -3797,6 +4233,7 @@ public class JanusPMSimulation : MonoBehaviour
                     ksum[b] += nn; cnt[b]++;
                 }
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- profil empilé autour des pics du milieu
         //   Pics : maxima locaux de δm (32³), δm > seuil, les plus forts d'abord, séparés d'au moins LssPeakMinSep.
         //   Centre affiné sur la cellule 64³ la plus dense du bloc 2×2×2.
@@ -3901,6 +4338,7 @@ public class JanusPMSimulation : MonoBehaviour
         double negRatio = NegOwnScale ? readbackANeg / aNow : double.NaN;
         vals.Add(voidR); vals.Add(voidR * mpcPerUnit); vals.Add(negRatio);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- vides des baryons : même détecteur pour tous les modèles
         //   Centres : minima locaux de δb (32³) sous LssVoidDelta, les plus profonds d'abord, séparés d'au moins
         //   LssPeakMinSep cellules. Profil empilé des deux populations autour des (au plus LssMaxPeaks) plus profonds.
@@ -3979,6 +4417,7 @@ public class JanusPMSimulation : MonoBehaviour
         vals.Add(voids.Count); vals.Add(voids.Count / vol100); vals.Add(bvR); vals.Add(bvR * mpcPerUnit); vals.Add(ridge);
         vals.AddRange(pVB); vals.AddRange(pVM);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- profils de vides empilés en r / R_v (méthode des relevés : Hamaus et al. 2014)
         //   Grille 128³. R_v de chaque vide : rayon où le contraste CUMULÉ des baryons Δ(<r) remonte à −0,5.
         //   Empilement en x = r / R_v ; crête = maximum de δ_ord pour 1 ≤ x < 3, pour tous les vides puis
@@ -4068,6 +4507,7 @@ public class JanusPMSimulation : MonoBehaviour
                 }
         rcand.Sort((p, q) => dsm[p].CompareTo(dsm[q]));
         int scale = N2 / N;                                                          // cellules fines par cellule 64³
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- catalogue de vides commun (empilement, lentille, fonction de taille)
         //   Tous les minima détectés : R_v par la règle Δ_ord cumulé = −0,5 (coquilles de la grille 128³), puis
         //   suppression des recouvrements, du plus grand au plus petit : un vide est rejeté s'il chevauche un vide
@@ -4221,6 +4661,7 @@ public class JanusPMSimulation : MonoBehaviour
         vals.AddRange(rvAllB); vals.AddRange(rvAllM);
         vals.AddRange(rvSmallB); vals.AddRange(rvSmallM);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- lentille gravitationnelle des vides (point 2)
         //   Source vue par la lumière du secteur positif = celle qui accélère les particules positives :
         //     Janus  : ρ_ord − (c−/c+)² |ρ−|   (les masses négatives dévient la lumière en sens inverse)
@@ -4317,6 +4758,7 @@ public class JanusPMSimulation : MonoBehaviour
         vals.Add(dsMinL); vals.Add(dsMinL * LensPhysFactor * rvHLarge);
         vals.AddRange(lensSig); vals.AddRange(lensDsig); vals.AddRange(lensSmallDsig); vals.AddRange(lensLargeDsig);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- empilement à taille de vide égale : tranches fixes de R_v en Mpc/h (mêmes pour tous les modèles)
         //   Permet de comparer Janus et ΛCDM à R_v égal et de superposer les profils aux mesures publiées
         //   (profils de densité et ΔΣ des relevés, présentés par tranches de rayon). ΔΣ converti avec le R_v médian
@@ -4368,6 +4810,7 @@ public class JanusPMSimulation : MonoBehaviour
                             (rs.Count > 0 ? L(" crête ", " ridge ") + $"{ridgeT:+0.00;-0.00} ΔΣmin {dsMinT:+0.00;-0.00}" : ""));
         }
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- galaxies traceuses et vides « comme les relevés » (BOSS, DES)
         //   Groupes friends-of-friends des particules ordinaires (longueur de liaison 0,2 × séparation moyenne,
         //   au moins GalMinMembers particules), les plus massifs gardés jusqu'à la densité de BOSS
@@ -4376,11 +4819,15 @@ public class JanusPMSimulation : MonoBehaviour
         //   cumulé des galaxies atteint GalVoidDelta (−0,8), sans recouvrement. Profils (galaxies, matière ordinaire,
         //   milieu) et lentille ΔΣ par tranches de R_v en Mpc/h. Calculé à la mesure finale seulement (campagne).
         var galNames = GalNames();
-        bool doGal = isFinal || !batchMode;
+        // Une campagne mesure toujours tout : le réglage « Mesures à l'écran » ne vaut que hors campagne.
+        LssOutputs outs = batchMode ? LssOutputs.Completes : lssOutputs;
+        bool doGal = (isFinal || !batchMode) && outs != LssOutputs.Minimales;
+        bool doCl = outs == LssOutputs.Completes;
         var gv = new System.Collections.Generic.List<double>();
         string galLine = "";
         if (doGal)
         {
+            yield return null;   // rend la main à l'affichage entre deux blocs de mesure
             var tracers = FindGalaxyTracers(data, out int nGroups, out int minMem, out double targetN, out double pMass,
                                             out System.Collections.Generic.List<Vector3> clCenters);
             int nT = tracers.Count;
@@ -4583,8 +5030,14 @@ public class JanusPMSimulation : MonoBehaviour
                 galSb.Append($"  [{GvEdges[t]:F0}–{GvEdges[t + 1]:F0}] n={tR[t].Count}" +
                              (tR[t].Count > 0 ? L(" crête gal ", " gal ridge ") + $"{rgT:+0.00;-0.00} ΔΣmin {dsMn:+0.00;-0.00}" : ""));
             }
-            gv.AddRange(ClusterMassFunction(data, clCenters, pMass, out string clLine));
-            galSb.Append("\n" + clLine);
+            yield return null;   // rend la main à l'affichage entre deux blocs de mesure
+            if (doCl)
+            {
+                gv.AddRange(ClusterMassFunction(data, clCenters, pMass, out string clLine));
+                galSb.Append("\n" + clLine);
+            }
+            else galSb.Append(L("\nAmas : bloc non calculé (Mesures à l'écran = allégées)",
+                                "\nClusters: block not computed (on-screen measurements = lightened)"));
             galLine = L("Galaxies traceuses : ", "Tracer galaxies: ") + $"{nT} / {targetN:F0}" + L(" visées (groupes ≥ ", " targeted (groups ≥ ") +
                       $"{GalMinMembers} : {nGroups}, " + L("plus petit retenu ", "smallest kept ") + $"{minMem} part. × {pMass:E1} M☉)\n" +
                       L("Vides de galaxies : ", "Galaxy voids: ") + $"{gkR.Count}" + L(", R_v médian ", ", median R_v ") +
@@ -4594,6 +5047,7 @@ public class JanusPMSimulation : MonoBehaviour
         if (gv.Count > galNames.Count) gv.RemoveRange(galNames.Count, gv.Count - galNames.Count);
         vals.AddRange(gv);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- fonction de taille des vides (point 3) : catalogue construit plus haut (keptR, sans recouvrement)
         double toMpch = mpcPerUnit * LcdmH;
         double volMpch = System.Math.Pow(lssBoxMpc * LcdmH, 3);                          // (Mpc/h)³
@@ -4622,6 +5076,7 @@ public class JanusPMSimulation : MonoBehaviour
         vals.Add(n10 * per100); vals.Add(n20 * per100); vals.Add(n30 * per100);
         vals.AddRange(vsfCount); vals.AddRange(vsfDn);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- spectre en unités physiques : k en h/Mpc, P en (Mpc/h)³ ; référence linéaire ΛCDM au même redshift
         double sH = lssBoxMpc > 0f ? lssBoxMpc * IcH / boxSize : double.NaN;        // (Mpc/h) par unité de longueur
         if (double.IsNaN(lcdmAmp1)) lcdmAmp1 = SpectrumAmplitude(1.0, 0.965);
@@ -4658,6 +5113,7 @@ public class JanusPMSimulation : MonoBehaviour
         double tGyr = readbackTime * TimeUnitGyr();
         double zNow = RedshiftAt(aNow);
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- affichage
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(L("STRUCTURE À GRANDE ÉCHELLE — modèle ", "LARGE-SCALE STRUCTURE — model ") + $"{lssModel}, expansion {EffectiveLaw}" +
@@ -4732,6 +5188,7 @@ public class JanusPMSimulation : MonoBehaviour
             if (csvPath != null) sb.AppendLine("CSV : " + System.IO.Path.GetFileName(csvPath));
         }
 
+        yield return null;   // rend la main à l'affichage entre deux blocs de mesure
         // ---- campagne
         if (batchMode && stats != null)
         {
@@ -4752,6 +5209,15 @@ public class JanusPMSimulation : MonoBehaviour
             sb.Insert(0, L("CAMPAGNE", "CAMPAIGN") + $" : run {runIndex + 1}/{queue.Count} — {queue[runIndex].name}, seed {seed}" +
                          (SelfConsistent ? $"   (a = {aNow:F2} / {expansionFactorEnd:F1})\n"
                                          : $"   (t = {readbackTime:F0} / {batchEndTime:F0})\n"));
+        }
+        if (epsPosMax > 0 || epsNegMax > 0)
+        {
+            var ciE = System.Globalization.CultureInfo.InvariantCulture;
+            sb.Append(L("\nRésidus de Friedmann (max sur le run) : secteur positif ", "\nFriedmann residuals (max over the run): positive sector ") +
+                      (epsPosMax > 0 ? epsPosMax.ToString("0.0E0", ciE) : "—") +
+                      L(", secteur négatif ", ", negative sector ") +
+                      (epsNegMax > 0 ? epsNegMax.ToString("0.0E0", ciE) : "—") +
+                      (timestepFactor < 0.999f ? L("   (pas × ", "   (step × ") + timestepFactor.ToString("0.###", ciE) + ")" : ""));
         }
         string warnDt = TimestepWarning();
         if (warnDt != null) sb.Insert(0, warnDt + "\n");
@@ -4802,11 +5268,47 @@ public class JanusPMSimulation : MonoBehaviour
         foreach (double rf in ClFbRadii) l.Add("cl_fb_r" + rf.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "mpc_median_gt1e13");
         // même fraction, mais en projection (cylindre de ±ClLosHalfMpc le long de la ligne de visée, comme une lentille)
         foreach (double rf in ClLensRadii) l.Add("cl_fbproj_r" + rf.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "mpc_median_gt1e13");
+        // masse de lentille contre lumière : relation masse-richesse sur les halos de la définition indépendante du
+        // milieu (≥ 10¹²). La « lumière » est l'excès de masse ordinaire projeté, la « lentille » l'excès de masse
+        // effective projeté, dans le même cylindre. _corr et _slope sont ajustés sur leurs log10 ; _scatter_dex est
+        // la dispersion résiduelle ; _median_ratio est le rapport masse-lumière médian ; _frac_mlens_neg est la part
+        // des halos détectés en lumière dont la masse de lentille est négative, donc sans signal détectable.
+        // Attendu ΛCDM : corr proche de 1, pente proche de 1, dispersion faible, rapport ≈ Ω_m/Ω_b, fraction nulle.
+        foreach (double rf in ClLensRadii)
+        {
+            string rr = "cl_mlr_r" + rf.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "mpc";
+            l.Add(rr + "_n"); l.Add(rr + "_corr"); l.Add(rr + "_slope"); l.Add(rr + "_scatter_dex");
+            l.Add(rr + "_median_ratio"); l.Add(rr + "_median_logmb"); l.Add(rr + "_frac_mlens_neg");
+            l.Add(rr + "_w_n"); l.Add(rr + "_w_scatter_dex"); l.Add(rr + "_w_median_ratio");
+        }
         // densité du milieu (masses négatives, ou matière noire des témoins) autour des halos ≥ 10¹² : ρ_m(coquille) / ρ̄_m
         l.Add("cl_negprof_n_halos_gt1e12");
         for (int q = 0; q + 1 < ClNegEdges.Length; q++)
             l.Add("cl_negprof_r" + ClNegEdges[q].ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "_" +
                   ClNegEdges[q + 1].ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "mpc_median_gt1e12");
+        // profil empilé : surdensité, comptage brut cumulé, comptage attendu cumulé (sensibilité)
+        for (int q = 0; q + 1 < ClNegEdges.Length; q++)
+        {
+            string sh = "r" + ClNegEdges[q].ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "_" +
+                        ClNegEdges[q + 1].ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "mpc";
+            l.Add("cl_negstack_" + sh); l.Add("cl_negstack_" + sh + "_npart"); l.Add("cl_negstack_" + sh + "_nexp");
+        }
+        // Comptage de halos indépendant du milieu : R200m est défini sur la seule matière ordinaire (δ_ord ≥ 200).
+        // Le critère M200m,eff soustrait w·δM_milieu ; dans Janus, w < 0 avec un milieu surdense repousse de vrais
+        // amas de baryons sous le seuil. Ces colonnes comptent les mêmes objets sans ce terme.
+        l.Add("cl_n_halos_ord"); l.Add("cl_logm_ord_max"); l.Add("cl_r200ord_mpc_median_gt1e12");
+        foreach (double t in ClThrB) l.Add("cl_ngt_ord_logM" + ClLab(t) + "_hmpc3");
+        // Test d'effondrement, empilé sur les halos ≥ 10¹². Pour chaque rayon :
+        //   _db    = 1 + δ_ord(< r) : surdensité cumulée de la matière ordinaire — mesure directe de l'effondrement
+        //   _dm    = 1 + δ_milieu(< r) : surdensité cumulée du milieu (masses négatives, ou matière noire des témoins)
+        //   _gfrac = part de l'accélération radiale fournie par le milieu, = w·δM_milieu / δM_ord (sans dimension,
+        //            le 1/r² se simplifie). Dans ΛCDM, ≈ Ω_c/Ω_b > 0. Dans Janus, w < 0 : positif seulement si le
+        //            milieu est en déficit (il tire alors vers le centre), négatif s'il s'accumule (il repousse).
+        for (int q = 0; q < ClColRadii.Length; q++)
+        {
+            string rr = ClColName(ClColRadii[q]);
+            l.Add("cl_col_" + rr + "_db"); l.Add("cl_col_" + rr + "_dm"); l.Add("cl_col_" + rr + "_gfrac");
+        }
         return l;
     }
     // Groupes friends-of-friends des particules ordinaires ; renvoie les centres de masse des plus massifs,
@@ -4926,8 +5428,23 @@ public class JanusPMSimulation : MonoBehaviour
     const double ClRmaxMpc = 5.0;
     static readonly double[] ClFbRadii = { 1, 2, 3, 5 };     // Mpc : rayons fixes de la fraction de baryons
     static readonly double[] ClLensRadii = { 1, 2 };         // Mpc : rayons des cylindres de lentille projetée
+    // Fenêtre de masse appariée pour la dispersion masse-lumière : log10(M_ord projeté, h⁻¹ M☉).
+    // ΛCDM s'étend jusqu'à 10¹⁴˙²⁵ et Janus s'arrête vers 10¹³˙⁶ : à échantillon complet, les deux dispersions
+    // sont ajustées sur des leviers en x différents et ne sont pas strictement comparables. Dans la fenêtre,
+    // la pente est fixée à 1 et la dispersion est mesurée autour du rapport médian : c'est bien défini même
+    // sur un levier court, et c'est la grandeur que la littérature donne (σ à masse de traceur fixée).
+    static readonly double[] ClMlrWindow = { 13.0, 13.6 };
     static readonly double[] ClNegEdges = { 0, 1, 2, 3, 5 };  // Mpc : coquilles du profil de densité du milieu
-    const double ClLosHalfMpc = 50.0;                         // Mpc : demi-profondeur de la ligne de visée
+    static readonly double[] ClColRadii = { 0.5, 1, 2, 3, 5 }; // Mpc : rayons du test d'effondrement (bilan des deux secteurs)
+    static string ClColName(double r) => "r" + r.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture).Replace(".", "p") + "mpc";
+    static string ColLine(double[] db, double[] dm, double[] gf)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int q = 0; q < ClColRadii.Length; q++)
+            sb.Append($"\n  {ClColRadii[q]:0.#} Mpc : {db[q]:F1} / {dm[q]:F2} / {gf[q]:+0.00;-0.00;0.00}");
+        return sb.ToString();
+    }
+    const double ClLosHalfMpc = 50.0;                        // Mpc : demi-profondeur de la ligne de visée
     const int ClShells = 60;
     static readonly double[] ClThrEff = { 13.0, 13.5, 14.0, 14.5, 15.0 };   // log10 M200m,eff [h⁻¹ M☉]
     static readonly double[] ClThrB = { 12.0, 12.5, 13.0, 13.5, 14.0 };     // log10 M_ord(< R200m) [h⁻¹ M☉]
@@ -4998,18 +5515,32 @@ public class JanusPMSimulation : MonoBehaviour
         var hC = new System.Collections.Generic.List<Vector3>();
         var hF = new System.Collections.Generic.List<double[]>();   // fraction de baryons : [R200m, ClFbRadii…]
         var hN = new System.Collections.Generic.List<double[]>();   // ρ_milieu / moyenne dans les coquilles ClNegEdges
+        var hNc = new System.Collections.Generic.List<double[]>();  // comptages bruts et comptages attendus, pour l'empilement
+        var hA = new System.Collections.Generic.List<double[]>();   // effondrement : 4 nombres par rayon (cb, cb attendu, cm, cm attendu)
         var hb = new double[ClShells]; var hm = new double[ClShells];
         var fbK = new int[ClFbRadii.Length];
         for (int q = 0; q < ClFbRadii.Length; q++)
             fbK[q] = System.Math.Max(0, System.Math.Min(ClShells - 1, (int)System.Math.Round(ClFbRadii[q] / mpcU / dr) - 1));
+        var colK = new int[ClColRadii.Length];
+        for (int q = 0; q < ClColRadii.Length; q++)
+            colK[q] = System.Math.Max(0, System.Math.Min(ClShells - 1, (int)System.Math.Round(ClColRadii[q] / mpcU / dr) - 1));
+        // Définition de halo INDÉPENDANTE DU MILIEU : R200m,ord est le rayon où la seule matière ordinaire
+        // atteint 200 fois sa densité moyenne. Le critère M200m,eff habituel soustrait w·δM_milieu ; dans Janus,
+        // où w < 0 et le milieu est surdense autour des halos, il repousse de vrais amas de baryons sous le seuil.
+        // Ces colonnes comptent les mêmes objets sans ce terme, pour séparer l'effet physique de l'effet de définition.
+        var hOm = new System.Collections.Generic.List<double>();   // M_ord(< R200m,ord) [particules ordinaires]
+        var hOr = new System.Collections.Generic.List<double>();   // R200m,ord (unités du code)
+        var hOc = new System.Collections.Generic.List<Vector3>();
         foreach (Vector3 c in centers)
         {
             System.Array.Clear(hb, 0, ClShells); System.Array.Clear(hm, 0, ClShells);
             Shells(c, bpos, bStart, bOrder, hb);
             Shells(c, mpos, mStart, mOrder, hm);
             double cb = 0, cm = 0, mE = double.NaN, mBk = double.NaN, rK = double.NaN;
+            double mO = double.NaN, rO = double.NaN; bool foundO = false;
             bool found = false;
             var fb = new double[1 + ClFbRadii.Length];
+            var col = new double[4 * ClColRadii.Length];
             for (int k = 0; k < ClShells; k++)
             {
                 cb += hb[k]; cm += hm[k];
@@ -5020,22 +5551,38 @@ public class JanusPMSimulation : MonoBehaviour
                     if (meff >= 200.0 * refBar * vr) { mE = meff; mBk = cb; rK = r; }
                     else if (!double.IsNaN(mE)) found = true;             // première descente sous 200 ρ̄ : R200m trouvé
                 }
+                if (!foundO)                                              // même critère, matière ordinaire seule
+                {
+                    if (cb >= 200.0 * nbBar * vr) { mO = cb; rO = r; }
+                    else if (!double.IsNaN(mO)) foundO = true;
+                }
                 // fraction de baryons de l'excès de masse (fond retiré, comme en lentille) : δM_ord / δM_eff
                 double exB = cb - nbBar * vr, exE = meff - refBar * vr;
                 for (int q = 0; q < ClFbRadii.Length; q++)
                     if (k == fbK[q]) fb[1 + q] = exE > 0 ? exB / exE : double.NaN;
                 if (!found && rK == r) fb[0] = exE > 0 ? exB / exE : double.NaN;
+                // test d'effondrement : masses cumulées des deux secteurs, et ce qu'on attendrait à la densité moyenne
+                for (int q = 0; q < ClColRadii.Length; q++)
+                    if (k == colK[q])
+                    {
+                        col[4 * q] = cb; col[4 * q + 1] = nbBar * vr;
+                        col[4 * q + 2] = cm; col[4 * q + 3] = nmBar * vr;
+                    }
             }
+            if (!double.IsNaN(mO)) { hOm.Add(mO); hOr.Add(rO); hOc.Add(c); }   // avant le filtre M_eff : indépendant du milieu
             if (double.IsNaN(mE)) continue;
             var np = new double[ClNegEdges.Length - 1];
+            var nc = new double[2 * (ClNegEdges.Length - 1)];   // [0..3] comptages bruts, [4..7] comptages attendus à ρ̄
             for (int q = 0; q + 1 < ClNegEdges.Length; q++)
             {
                 double r0 = ClNegEdges[q] / mpcU, r1 = ClNegEdges[q + 1] / mpcU, cnt = 0;
                 for (int k = 0; k < ClShells; k++) { double rc = (k + 0.5) * dr; if (rc >= r0 && rc < r1) cnt += hm[k]; }
                 double vol = 4.0 / 3.0 * System.Math.PI * (r1 * r1 * r1 - r0 * r0 * r0);
                 np[q] = nmBar > 0 ? cnt / (nmBar * vol) : double.NaN;
+                nc[q] = cnt;
+                nc[ClNegEdges.Length - 1 + q] = nmBar * vol;    // sensibilité : < 1 ⇒ la mesure par halo est aveugle
             }
-            hMass.Add(mE); hB.Add(mBk); hR.Add(rK); hC.Add(c); hF.Add(fb); hN.Add(np);
+            hMass.Add(mE); hB.Add(mBk); hR.Add(rK); hC.Add(c); hF.Add(fb); hN.Add(np); hNc.Add(nc); hA.Add(col);
         }
         // doublons : du plus massif au moins massif, rejet d'un centre dans le R200m d'un amas retenu
         var ord = new System.Collections.Generic.List<int>();
@@ -5045,6 +5592,8 @@ public class JanusPMSimulation : MonoBehaviour
         var keepR = new System.Collections.Generic.List<double>(); var keepC = new System.Collections.Generic.List<Vector3>();
         var keepF = new System.Collections.Generic.List<double[]>();
         var keepN = new System.Collections.Generic.List<double[]>();
+        var keepNc = new System.Collections.Generic.List<double[]>();
+        var keepA = new System.Collections.Generic.List<double[]>();
         foreach (int i in ord)
         {
             bool dup = false;
@@ -5055,10 +5604,37 @@ public class JanusPMSimulation : MonoBehaviour
                 double ddz = System.Math.Abs(hC[i].z - keepC[u].z); ddz = System.Math.Min(ddz, Lb - ddz);
                 if (ddx * ddx + ddy * ddy + ddz * ddz < keepR[u] * keepR[u]) dup = true;
             }
-            if (!dup) { keepM.Add(hMass[i]); keepB.Add(hB[i]); keepR.Add(hR[i]); keepC.Add(hC[i]); keepF.Add(hF[i]); keepN.Add(hN[i]); }
+            if (!dup) { keepM.Add(hMass[i]); keepB.Add(hB[i]); keepR.Add(hR[i]); keepC.Add(hC[i]); keepF.Add(hF[i]); keepN.Add(hN[i]); keepNc.Add(hNc[i]); keepA.Add(hA[i]); }
         }
         double toH = pMass * LcdmH;                                         // particules ordinaires → h⁻¹ M☉
         double volH = System.Math.Pow(lssBoxMpc * LcdmH, 3);                 // (Mpc/h)³
+        // doublons de la définition indépendante du milieu : même règle, avec R200m,ord
+        var ordO = new System.Collections.Generic.List<int>();
+        for (int i = 0; i < hOm.Count; i++) ordO.Add(i);
+        ordO.Sort((p, q) => hOm[q].CompareTo(hOm[p]));
+        var keepOm = new System.Collections.Generic.List<double>();
+        var keepOr = new System.Collections.Generic.List<double>();
+        var keepOc = new System.Collections.Generic.List<Vector3>();
+        foreach (int i in ordO)
+        {
+            bool dupO = false;
+            for (int u = 0; u < keepOc.Count && !dupO; u++)
+            {
+                double ddx = System.Math.Abs(hOc[i].x - keepOc[u].x); ddx = System.Math.Min(ddx, Lb - ddx);
+                double ddy = System.Math.Abs(hOc[i].y - keepOc[u].y); ddy = System.Math.Min(ddy, Lb - ddy);
+                double ddz = System.Math.Abs(hOc[i].z - keepOc[u].z); ddz = System.Math.Min(ddz, Lb - ddz);
+                if (ddx * ddx + ddy * ddy + ddz * ddz < keepOr[u] * keepOr[u]) dupO = true;
+            }
+            if (!dupO) { keepOm.Add(hOm[i]); keepOr.Add(hOr[i]); keepOc.Add(hOc[i]); }
+        }
+        double mOrdMax = double.NaN; var rOrd12 = new System.Collections.Generic.List<double>();
+        for (int i = 0; i < keepOm.Count; i++)
+        {
+            double m = keepOm[i] * toH;
+            if (double.IsNaN(mOrdMax) || m > mOrdMax) mOrdMax = m;
+            if (m >= 1e12) rOrd12.Add(keepOr[i] * mpcU);
+        }
+        rOrd12.Sort();
         var ratios = new System.Collections.Generic.List<double>(); var r14 = new System.Collections.Generic.List<double>();
         double mMax = double.NaN;
         for (int i = 0; i < keepM.Count; i++)
@@ -5166,6 +5742,97 @@ public class JanusPMSimulation : MonoBehaviour
             projMed[q] = projLists[q].Count > 0 ? projLists[q][projLists[q].Count / 2] : double.NaN;
             res.Add(projMed[q]);
         }
+        // ---- MASSE DE LENTILLE CONTRE LUMIÈRE (relation masse-richesse) ----
+        // Un relevé optique trouve un amas par sa lumière, puis le pèse par lentille gravitationnelle. La lumière
+        // trace les baryons ; la masse de lentille est la masse EFFECTIVE (§5.7), qui mêle les deux secteurs.
+        // Dans ΛCDM, M_lens ≈ (1 + Ω_c/Ω_b) M_b : la relation est serrée, de pente 1, parce que la matière noire
+        // suit les baryons. Dans Janus, M_lens = M_b + w·δM_milieu : si le milieu négatif ne suit pas les baryons,
+        // la relation se disperse, et une partie des halos sort avec une masse de lentille négative, c'est-à-dire
+        // sans signal de lentille détectable. C'est la prédiction falsifiable dégagée le 03/11/2026 : les relevés
+        // trouvent masse de lentille et richesse optique bien corrélées.
+        //   Note de conception : la « richesse » est ici l'excès de masse ordinaire projeté, non un comptage de
+        //   groupes friends-of-friends. Ces groupes valent environ un par halo (2 589 groupes pour 2 496 halos dans
+        //   ΛCDM), donc leur comptage n'aurait aucune dynamique et la corrélation serait indéfinie.
+        // Échantillon : les halos de la définition INDÉPENDANTE DU MILIEU (≥ 10¹²), ceux qu'un relevé optique verrait.
+        var mlrN = new double[ClLensRadii.Length];
+        var mlrCorr = new double[ClLensRadii.Length];
+        var mlrSlope = new double[ClLensRadii.Length];
+        var mlrScat = new double[ClLensRadii.Length];
+        var mlrMedRatio = new double[ClLensRadii.Length];
+        var mlrMedLogMb = new double[ClLensRadii.Length];
+        var mlrNegFrac = new double[ClLensRadii.Length];
+        var mlrWn = new double[ClLensRadii.Length];
+        var mlrWscat = new double[ClLensRadii.Length];
+        var mlrWratio = new double[ClLensRadii.Length];
+        int iMlr = ClLensRadii.Length > 1 ? 1 : 0;          // rayon affiché à l'écran : 2 Mpc si disponible
+        {
+            int nq = ClLensRadii.Length;
+            var sx = new double[nq]; var sy = new double[nq]; var sxx = new double[nq];
+            var syy = new double[nq]; var sxy = new double[nq]; var negC = new int[nq]; var tot = new int[nq];
+            var xs = new System.Collections.Generic.List<double>[nq]; var ys = new System.Collections.Generic.List<double>[nq];
+            var rt = new System.Collections.Generic.List<double>[nq];
+            var wr = new System.Collections.Generic.List<double>[nq];   // log10(M_lens/M_ord) dans la fenêtre appariée
+            for (int q = 0; q < nq; q++)
+            {
+                xs[q] = new System.Collections.Generic.List<double>(); ys[q] = new System.Collections.Generic.List<double>();
+                rt[q] = new System.Collections.Generic.List<double>(); wr[q] = new System.Collections.Generic.List<double>();
+            }
+            for (int i = 0; i < keepOm.Count; i++)
+            {
+                if (keepOm[i] * toH < 1e12) continue;
+                System.Array.Clear(pcb, 0, pcb.Length); System.Array.Clear(pcm, 0, pcm.Length);
+                Cyl(keepOc[i], bpos, bStart, bOrder, pcb);
+                Cyl(keepOc[i], mpos, mStart, mOrder, pcm);
+                for (int q = 0; q < nq; q++)
+                {
+                    double rq = ClLensRadii[q] / mpcU, vol = System.Math.PI * rq * rq * 2 * losH;
+                    double mB = pcb[q] - nbBar * vol;                              // lumière : excès de masse ordinaire
+                    double mLens = mB + wc * (pcm[q] - nmBar * vol);               // lentille : excès de masse effective
+                    if (mB <= 0) continue;                                         // halo non détecté en projection
+                    tot[q]++;
+                    if (mLens <= 0) { negC[q]++; continue; }                        // pas de signal de lentille
+                    double x = System.Math.Log10(mB * toH), y = System.Math.Log10(mLens * toH);
+                    sx[q] += x; sy[q] += y; sxx[q] += x * x; syy[q] += y * y; sxy[q] += x * y;
+                    xs[q].Add(x); ys[q].Add(y); rt[q].Add(mLens / mB);
+                    if (x >= ClMlrWindow[0] && x <= ClMlrWindow[1]) wr[q].Add(y - x);   // fenêtre appariée : log10 du rapport
+                }
+            }
+            for (int q = 0; q < nq; q++)
+            {
+                int n = xs[q].Count;
+                mlrN[q] = n;
+                mlrNegFrac[q] = tot[q] > 0 ? negC[q] / (double)tot[q] : double.NaN;
+                double dx = n * sxx[q] - sx[q] * sx[q], dy = n * syy[q] - sy[q] * sy[q];
+                if (n >= 5 && dx > 1e-12 && dy > 1e-12)
+                {
+                    double cov = n * sxy[q] - sx[q] * sy[q];
+                    mlrCorr[q] = cov / System.Math.Sqrt(dx * dy);
+                    mlrSlope[q] = cov / dx;
+                    double b = (sy[q] - mlrSlope[q] * sx[q]) / n, ss = 0;
+                    for (int k = 0; k < n; k++) { double r = ys[q][k] - (mlrSlope[q] * xs[q][k] + b); ss += r * r; }
+                    mlrScat[q] = System.Math.Sqrt(ss / n);
+                }
+                else { mlrCorr[q] = double.NaN; mlrSlope[q] = double.NaN; mlrScat[q] = double.NaN; }
+                var sr = new System.Collections.Generic.List<double>(rt[q]); sr.Sort();
+                var sm = new System.Collections.Generic.List<double>(xs[q]); sm.Sort();
+                mlrMedRatio[q] = sr.Count > 0 ? sr[sr.Count / 2] : double.NaN;
+                mlrMedLogMb[q] = sm.Count > 0 ? sm[sm.Count / 2] : double.NaN;
+                // fenêtre appariée : pente fixée à 1, dispersion autour du rapport médian
+                var w = new System.Collections.Generic.List<double>(wr[q]); w.Sort();
+                mlrWn[q] = w.Count;
+                if (w.Count >= 5)
+                {
+                    double med = w[w.Count / 2], ss2 = 0;
+                    for (int k = 0; k < w.Count; k++) { double r = w[k] - med; ss2 += r * r; }
+                    mlrWscat[q] = System.Math.Sqrt(ss2 / w.Count);
+                    mlrWratio[q] = System.Math.Pow(10, med);
+                }
+                else { mlrWscat[q] = double.NaN; mlrWratio[q] = double.NaN; }
+                res.Add(mlrN[q]); res.Add(mlrCorr[q]); res.Add(mlrSlope[q]); res.Add(mlrScat[q]);
+                res.Add(mlrMedRatio[q]); res.Add(mlrMedLogMb[q]); res.Add(mlrNegFrac[q]);
+                res.Add(mlrWn[q]); res.Add(mlrWscat[q]); res.Add(mlrWratio[q]);
+            }
+        }
         // profil du milieu autour des halos ≥ 10¹² h⁻¹ M☉ (médianes) : le milieu est-il plus dense ou moins dense que la moyenne ?
         int nNeg = 0;
         var negLists = new System.Collections.Generic.List<double>[ClNegEdges.Length - 1];
@@ -5184,6 +5851,65 @@ public class JanusPMSimulation : MonoBehaviour
             negMed[q] = negLists[q].Count > 0 ? negLists[q][negLists[q].Count / 2] : double.NaN;
             res.Add(negMed[q]);
         }
+        // Profil EMPILÉ : somme des comptages sur tous les halos, divisée par la somme des comptages attendus à ρ̄.
+        // Indispensable au centre : à la densité moyenne, on n'attend que ≈ 0,09 particule de milieu entre 0 et 1 Mpc
+        // pour un seul halo (boîte de 400 Mpc, 1,4 million de particules de milieu). La médiane par halo y vaut donc 0
+        // quelle que soit la physique, et ce zéro ne mesure rien. L'empilement multiplie la sensibilité par le nombre de halos.
+        var negStack = new double[negLists.Length];
+        double negStack0Exp = 0, negStack1Exp = 0, negStack2Exp = 0, negStack3Exp = 0;
+        for (int q = 0; q < negLists.Length; q++)
+        {
+            double sum = 0, exp = 0;
+            for (int i = 0; i < keepM.Count; i++)
+            {
+                if (keepM[i] * toH < 1e12 || keepNc[i] == null) continue;
+                sum += keepNc[i][q];
+                exp += keepNc[i][negLists.Length + q];
+            }
+            negStack[q] = exp > 0 ? sum / exp : double.NaN;
+            if (q == 0) negStack0Exp = exp;
+            else if (q == 1) negStack1Exp = exp;
+            else if (q == 2) negStack2Exp = exp; else if (q == 3) negStack3Exp = exp;
+            res.Add(negStack[q]);                       // surdensité empilée
+            res.Add(sum);                               // comptage brut cumulé
+            res.Add(exp);                               // comptage attendu cumulé à ρ̄ (= sensibilité de la mesure)
+        }
+        // Comptage de halos INDÉPENDANT DU MILIEU (R200m,ord) : voir le commentaire au-dessus de hOm.
+        res.Add(keepOm.Count);
+        res.Add(double.IsNaN(mOrdMax) ? double.NaN : System.Math.Log10(mOrdMax));
+        res.Add(rOrd12.Count > 0 ? rOrd12[rOrd12.Count / 2] : double.NaN);
+        foreach (double t in ClThrB)
+        {
+            int n = 0; double thr = System.Math.Pow(10, t);
+            foreach (double m in keepOm) if (m * toH >= thr) n++;
+            res.Add(volH > 0 ? n / volH : double.NaN);
+        }
+        // TEST D'EFFONDREMENT, empilé sur les halos ≥ 10¹² (même raison que ci-dessus : au centre, le milieu est
+        // trop peu peuplé pour qu'une mesure halo par halo signifie quelque chose).
+        //   db     = Σ N_ord(< r) / Σ N_ord attendus  → 1 + δ_ord(< r), la compacité atteinte par la matière ordinaire
+        //   dm     = Σ N_mil(< r) / Σ N_mil attendus  → 1 + δ_milieu(< r)
+        //   gfrac  = w · δM_milieu / δM_ord           → part de l'accélération radiale due au milieu (le 1/r² se simplifie).
+        // Dans ΛCDM, w > 0 et le halo est surdense : gfrac ≈ Ω_c/Ω_b ≈ 5, c'est la matière noire qui fait l'effondrement.
+        // Dans Janus, w < 0 : gfrac > 0 seulement si le milieu est en déficit (il tire alors vers le centre).
+        // Comparer les deux modèles à graines identiques répond à la question : le déficit de halos vient-il d'un
+        // effet physique du milieu négatif, ou seulement du manque de résolution ?
+        var colDb = new double[ClColRadii.Length]; var colDm = new double[ClColRadii.Length];
+        var colGf = new double[ClColRadii.Length];
+        for (int q = 0; q < ClColRadii.Length; q++)
+        {
+            double sb = 0, sbE = 0, sm = 0, smE = 0;
+            for (int i = 0; i < keepM.Count; i++)
+            {
+                if (keepM[i] * toH < 1e12 || keepA[i] == null) continue;
+                sb += keepA[i][4 * q]; sbE += keepA[i][4 * q + 1];
+                sm += keepA[i][4 * q + 2]; smE += keepA[i][4 * q + 3];
+            }
+            colDb[q] = sbE > 0 ? sb / sbE : double.NaN;
+            colDm[q] = smE > 0 ? sm / smE : double.NaN;
+            double exOrd = sb - sbE, exMed = wc * (sm - smE);
+            colGf[q] = System.Math.Abs(exOrd) > 1e-9 ? exMed / exOrd : double.NaN;
+            res.Add(colDb[q]); res.Add(colDm[q]); res.Add(colGf[q]);
+        }
         int n14 = 0; foreach (double m in keepM) if (m * toH >= 1e14) n14++;
         line = L("Amas : ", "Clusters: ") + $"{keepM.Count}" + L(" halos (", " halos (") + $"{centers.Count}" +
                L(" candidats), M200m ≥ 10¹⁴ h⁻¹ M☉ : ", " candidates), M200m ≥ 10¹⁴ h⁻¹ M☉: ") + $"{n14}" +
@@ -5192,8 +5918,25 @@ public class JanusPMSimulation : MonoBehaviour
                           L(", à 2 Mpc ", ", at 2 Mpc ") + $"{fbMed[2]:F2}" + L(", à 5 Mpc ", ", at 5 Mpc ") + $"{fbMed[4]:F2}" +
                           L(" ; en projection (lentille, ±50 Mpc) à 1 Mpc ", " ; projected (lensing, ±50 Mpc) at 1 Mpc ") + $"{projMed[0]:F2}" +
                           L(", à 2 Mpc ", ", at 2 Mpc ") + $"{projMed[1]:F2}" : "") +
-               (nNeg > 0 ? L("\nMilieu autour des halos ≥ 10¹² (ρ / ρ̄) : 0–1 Mpc ", "\nMedium around halos ≥ 10¹² (ρ / ρ̄): 0–1 Mpc ") +
-                           $"{negMed[0]:F2}, 1–2 : {negMed[1]:F2}, 2–3 : {negMed[2]:F2}, 3–5 : {negMed[3]:F2}" : "");
+               (nNeg > 0 ? L("\nMilieu autour des halos ≥ 10¹² (ρ / ρ̄, médiane) : 0–1 Mpc ", "\nMedium around halos ≥ 10¹² (ρ / ρ̄, median): 0–1 Mpc ") +
+                           $"{negMed[0]:F2}, 1–2 : {negMed[1]:F2}, 2–3 : {negMed[2]:F2}, 3–5 : {negMed[3]:F2}" +
+                           L("\nEmpilé (ρ / ρ̄, n attendu) : 0–1 Mpc ", "\nStacked (ρ / ρ̄, n expected): 0–1 Mpc ") +
+                           $"{negStack[0]:F2} ({negStack0Exp:F1}), 1–2 : {negStack[1]:F2} ({negStack1Exp:F1}), " +
+                           $"2–3 : {negStack[2]:F2} ({negStack2Exp:F1}), 3–5 : {negStack[3]:F2} ({negStack3Exp:F1})" : "") +
+               L("\nHalos sans le milieu (R200m,ord) : ", "\nHalos without the medium (R200m,ord): ") + $"{keepOm.Count}" +
+               L(" (contre ", " (vs ") + $"{keepM.Count}" + L(" avec M_eff), log M_ord max ", " with M_eff), max log M_ord ") +
+               (double.IsNaN(mOrdMax) ? "—" : $"{System.Math.Log10(mOrdMax):F2}") +
+               (mlrN[iMlr] >= 5 ? L("\nLentille contre lumière (halos ≥ 10¹²) : corr ", "\nLensing vs light (halos ≥ 10¹²): corr ") +
+                                $"{mlrCorr[iMlr]:F3}" + L(", pente ", ", slope ") + $"{mlrSlope[iMlr]:F2}" +
+                                L(", dispersion ", ", scatter ") + $"{mlrScat[iMlr]:F2} dex" +
+                                L(", M_lens/M_ord médian ", ", median M_lens/M_ord ") + $"{mlrMedRatio[iMlr]:F2}" +
+                                L(", sans signal ", ", no signal ") + $"{100 * mlrNegFrac[iMlr]:F0} %" +
+                                $"   ({ClLensRadii[iMlr]:0.#} Mpc, n = {mlrN[iMlr]:F0})" +
+                                (mlrWn[iMlr] >= 5 ? L("\n  fenêtre appariée 10^13,0 – 10^13,6 : dispersion ", "\n  matched window 10^13.0 – 10^13.6: scatter ") +
+                                                    $"{mlrWscat[iMlr]:F3} dex" + L(", rapport médian ", ", median ratio ") +
+                                                    $"{mlrWratio[iMlr]:F2}  (n = {mlrWn[iMlr]:F0})" : "") : "") +
+               (keepM.Count > 0 ? L("\nEffondrement (halos ≥ 10¹², empilé) 1+δ_ord / 1+δ_milieu / part du milieu dans g :",
+                                    "\nCollapse (halos ≥ 10¹², stacked) 1+δ_ord / 1+δ_medium / medium share of g:") + ColLine(colDb, colDm, colGf) : "");
         return res;
     }
 
@@ -5306,8 +6049,9 @@ public class JanusPMSimulation : MonoBehaviour
                     "run_id", "lss_model", "expansion_law", "expansion_self_consistent", "expansion_factor_end",
                     "expansion_duration", "expansion_end_time", "start_redshift", "time_unit_gyr", "seed",
                     "box_size", "grid_size", "smoothing_length", "positive_count", "negative_count",
-                    "positive_total_mass", "negative_total_mass", "G", "dt", "positive_sigma", "lss_medium_sigma",
+                    "positive_total_mass", "negative_total_mass", "G", "dt", "timestep_factor", "eps_friedmann_pos_max", "eps_friedmann_neg_max", "positive_sigma", "lss_medium_sigma",
                     "light_speed_ratio", "neg_own_scale_factor", "neg_scale_ratio_init", "neg_expansion_rate",
+                    "chi_ratio", "neg_clock_ratio", "neg_scale_from_kappa", "freeze_negatives", "neg_no_field_on_pos",
                     "t", "step", "a", "H", "z", "t_gyr", "H_kms_Mpc", "a_neg", "q"
                 };
                 cols.AddRange(LssMetricNames());
@@ -5321,8 +6065,11 @@ public class JanusPMSimulation : MonoBehaviour
                 Num(TimeUnitGyr()),
                 seed.ToString(), Num(boxSize), gridSize.ToString(), Num(smoothingLength),
                 positiveCount.ToString(), negativeCount.ToString(), Num(positiveTotalMass), Num(negativeTotalMass),
-                Num(G), Num(dt), Num(positiveSigma), Num(lssMediumSigma),
-                Num(LightSpeedRatio), NegOwnScale ? "1" : "0", Num(negativeScaleRatio), Num(negativeExpansionRate),
+                Num(G), Num(dt), Num(timestepFactor), Num(epsPosMax), Num(epsNegMax), Num(positiveSigma), Num(lssMediumSigma),
+                Num(LightSpeedRatio), NegOwnScale ? "1" : "0", Num(NegScale0), Num(negativeExpansionRate),
+                Num(ChiRatio), Num(Tau), KappaScaleLink ? "1" : "0",
+                freezeNegatives && lssModel == LssModel.Janus ? "1" : "0",
+                negNoFieldOnPositives && lssModel == LssModel.Janus ? "1" : "0",
                 Num(readbackTime), readbackStep.ToString(), Num(aNow), Num(hNow), Num(zNow), Num(tGyr), Num(HubbleKms(hNow)),
                 Num(readbackANeg), Num(Decel(readbackTime))
             };
@@ -5502,7 +6249,9 @@ public class JanusPMSimulation : MonoBehaviour
                         "light_speed_ratio", "neg_own_scale_factor", "neg_scale_ratio_init", "neg_expansion_rate", "box_size_mpc",
                         "initial_conditions", "sigma8", "spectral_index", "neg_initial_field",
                         "janus_ic", "janus_sigma8_today", "sigma8_start_pos", "lin_growth_pos", "lin_sigma8_final_pos",
-                        "lin_mode_neg_over_pos", "lin_mode_rate", "janus_pheno", "pheno_switch_z", "pheno_sharpness", "pheno_s_early", "neg_clock_ratio"
+                        "lin_mode_neg_over_pos", "lin_mode_rate", "janus_pheno", "pheno_switch_z", "pheno_sharpness", "pheno_s_early", "neg_clock_ratio",
+                        "chi_ratio", "chi_model", "newton_ratio", "neg_scale_from_kappa", "freeze_negatives", "neg_no_field_on_pos",
+                        "timestep_factor", "eps_friedmann_pos_max", "eps_friedmann_neg_max"
                     };
                     foreach (var nm in ActiveStatNames()) h.Add(nm);
                     if (curveRadii != null) foreach (var r in curveRadii) h.Add("v_r" + Mathf.RoundToInt(r) + "_final");
@@ -5530,7 +6279,7 @@ public class JanusPMSimulation : MonoBehaviour
                     IsLss ? Num(lssStartRedshift) : "",
                     IsLss ? janusCalibration.ToString() : "",
                     IsLss && ExpansionOn ? Num(HubbleKms(Hubble(stats.finT))) : "",
-                    Num(LightSpeedRatio), IsLss ? (NegOwnScale ? "1" : "0") : "", IsLss ? Num(negativeScaleRatio) : "",
+                    Num(LightSpeedRatio), IsLss ? (NegOwnScale ? "1" : "0") : "", IsLss ? Num(NegScale0) : "",
                     IsLss ? Num(NegOwnScale ? NegLambda() : negativeExpansionRate) : "", IsLss ? Num(lssBoxMpc) : "",
                     IsLss ? lssInitialConditions.ToString() : "", IsLss && IsRealisticIC ? Num(EffSigma8) : "",
                     IsLss && IsRealisticIC ? Num(lssSpectralIndex) : "",
@@ -5545,7 +6294,14 @@ public class JanusPMSimulation : MonoBehaviour
                     IsLss && sc.lss == LssModel.Janus ? (JanusPhenoOn ? "1" : "0") : "",
                     IsLss && JanusPhenoOn ? Num(janusPhenoZ) : "", IsLss && JanusPhenoOn ? Num(janusPhenoSharpness) : "",
                     IsLss && JanusPhenoOn ? Num(PhenoSEarly) : "",
-                    IsLss && sc.lss == LssModel.Janus ? Num(Tau) : ""
+                    IsLss && sc.lss == LssModel.Janus ? Num(Tau) : "",
+                    IsLss && sc.lss == LssModel.Janus ? Num(ChiRatio) : "",
+                    IsLss && sc.lss == LssModel.Janus ? Num(ChiModel) : "",
+                    IsLss && sc.lss == LssModel.Janus ? Num(NewtonRatio) : "",
+                    IsLss && sc.lss == LssModel.Janus ? (KappaScaleLink ? "1" : "0") : "",
+                    IsLss && sc.lss == LssModel.Janus ? (freezeNegatives ? "1" : "0") : "",
+                    IsLss && sc.lss == LssModel.Janus ? (negNoFieldOnPositives ? "1" : "0") : "",
+                    IsLss ? Num(timestepFactor) : "", IsLss ? Num(epsPosMax) : "", IsLss ? Num(epsNegMax) : ""
                 };
                 foreach (var v in ActiveStatValues(stats)) f.Add(Num(v));
                 if (curveRadii != null)

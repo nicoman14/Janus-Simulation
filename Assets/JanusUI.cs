@@ -986,16 +986,23 @@ public class JanusUI : MonoBehaviour
         }
     }
 
+    // Écriture d'un nombre : notation scientifique en dessous de 10⁻⁴, sinon décimale.
+    // Sans cela, une valeur comme 1e-6 s'affiche « 0 » et serait réécrite à zéro à la validation suivante.
+    static string Small(double x)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        return x != 0 && Math.Abs(x) < 1e-4 ? x.ToString("0.####E0", ci) : x.ToString("0.######", ci);
+    }
     static string Format(object v)
     {
         var ci = CultureInfo.InvariantCulture;
         switch (v)
         {
-            case float f: return f.ToString("0.######", ci);
-            case double d: return d.ToString("0.######", ci);
+            case float f: return Small(f);
+            case double d: return Small(d);
             case int i: return i.ToString(ci);
             case int[] a: return string.Join(", ", Array.ConvertAll(a, x => x.ToString(ci)));
-            case float[] fa: return string.Join(" ; ", Array.ConvertAll(fa, x => x.ToString("0.####", ci)));
+            case float[] fa: return string.Join(" ; ", Array.ConvertAll(fa, x => Small(x)));
             case null: return "";
             default: return v.ToString();
         }
